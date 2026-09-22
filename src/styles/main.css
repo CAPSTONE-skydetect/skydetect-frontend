@@ -1,0 +1,122 @@
+/* 관제실 화면이라 어두운 배경을 기본으로 둔다. 밝은 UI 옆에서 영상을 오래 보면
+   눈이 빨리 피로해지고, 하늘 영상의 미세한 점을 놓치기 쉽다. */
+
+:root {
+  --bg: #0d1117;
+  --bg-panel: #151b23;
+  --bg-elevated: #1c242e;
+  --border: #2a333f;
+  --border-strong: #3a4653;
+
+  --text: #e6edf3;
+  --text-dim: #9aa7b4;
+  --text-faint: #6b7886;
+
+  --accent: #4da3ff;
+  --accent-dim: #1f4f7a;
+
+  --bird: #4ade80;
+  --drone: #f87171;
+  --uncertain: #fbbf24;
+  --danger: #ef4444;
+
+  --radius: 10px;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "D2Coding", monospace;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Pretendard", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+button:hover:not(:disabled) { background: #232d38; border-color: var(--accent-dim); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+input {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  width: 100%;
+}
+input:focus { outline: 2px solid var(--accent-dim); outline-offset: 0; border-color: var(--accent); }
+
+.mono { font-family: var(--mono); }
+.dim { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+
+/* 패널 공통 */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.panel__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.panel__title { font-weight: 600; letter-spacing: 0.01em; }
+.panel__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* 상태 배지 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.badge--live { color: #ff6b6b; border-color: #5c2b2b; }
+.badge--ok { color: var(--bird); border-color: #2a5138; }
+.badge--warn { color: var(--uncertain); border-color: #5c4a1f; }
+.badge--error { color: var(--danger); border-color: #5c2626; }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.dot--pulse { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
