@@ -89,10 +89,7 @@ const isDefault = computed(() =>
         :disabled="disabled"
         @change="setOption('stabilize', $event.target.checked)"
       />
-      <span>
-        <b>카메라 움직임 보정</b>
-        <small class="faint">전역 움직임을 빼고 대상의 실제 궤적만 남긴다.</small>
-      </span>
+      <span><b>카메라 움직임 보정</b></span>
     </label>
 
     <label class="tuning__check">

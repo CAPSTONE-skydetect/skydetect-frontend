@@ -185,14 +185,8 @@ const tuningRows = computed(() => {
             <img v-if="selected.thumbnail" class="detail__video" :src="selected.thumbnail" alt="" />
             <p v-else class="faint detail__nomedia">남은 화면이 없습니다</p>
           </div>
-          <p class="faint detail__note">
-            판정 당시 화면과 지정한 박스다.
-            <template v-if="selected.overlayUrl">
-              추적 오버레이는
-              <a :href="selected.overlayUrl" download>내려받을 수 있다</a>.
-              OpenCV mp4v 코덱이라 브라우저에서는 재생되지 않고, AI 서버를 다시
-              띄우면 링크가 끊긴다.
-            </template>
+          <p v-if="selected.overlayUrl" class="detail__note">
+            <a :href="selected.overlayUrl" download>오버레이 내려받기</a>
           </p>
 
           <p v-if="(selected.featureReasons || []).length" class="detail__reason detail__reason--feature">
@@ -257,9 +251,6 @@ const tuningRows = computed(() => {
         </template>
       </div>
 
-      <p class="history__disclaimer faint">
-        기록은 이 브라우저에만 저장된다. 백엔드에 이력 API 가 생기면 서버 기록으로 바꾼다.
-      </p>
     </section>
   </main>
 </template>
@@ -347,7 +338,7 @@ const tuningRows = computed(() => {
 }
 .detail__video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .detail__nomedia { display: grid; place-items: center; height: 100%; margin: 0; }
-.detail__note { font-size: 11px; margin: 0; line-height: 1.5; }
+.detail__note { font-size: 12px; margin: 0; }
 .detail__note a { color: var(--accent); }
 
 .detail__reason--feature { background: #23252b; color: var(--text-dim); }
@@ -373,14 +364,6 @@ const tuningRows = computed(() => {
 
 .detail__features { display: flex; gap: 6px; flex-wrap: wrap; }
 .detail__feature { font-size: 11px; }
-
-.history__disclaimer {
-  flex: none;
-  margin: 0;
-  padding: 9px 14px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-}
 
 @media (max-width: 1100px) {
   .history { grid-template-columns: minmax(0, 1fr); grid-auto-rows: min-content; }

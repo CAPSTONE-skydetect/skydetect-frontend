@@ -427,7 +427,6 @@ watch(objectUrl, () => { result.value = null })
               <button
                 class="upload__icon"
                 :disabled="selectionMode"
-                :title="selectionMode ? '선택 중에는 재생하지 않는다' : ''"
                 @click="togglePlay"
               >{{ playing ? '❚❚' : '▶' }}</button>
               <button class="upload__icon" @click="seekToFrame(frameIndex - 1)">◀</button>
@@ -528,7 +527,6 @@ watch(objectUrl, () => { result.value = null })
           <div v-if="running" class="upload__waiting">
             <div class="spinner" />
             <p class="dim">추적 중 <b class="mono">{{ elapsedLabel }}</b></p>
-            <p class="faint">프레임 수와 해상도에 따라 수 분이 걸립니다.</p>
           </div>
 
           <OverlayPlayer
@@ -565,7 +563,6 @@ watch(objectUrl, () => { result.value = null })
           <a v-if="result.urls.metrics" :href="result.urls.metrics" download>Metrics</a>
           <a
             v-if="result.urls.overlay" :href="result.urls.overlay" download
-            title="OpenCV mp4v 코덱이라 브라우저에서는 재생되지 않는다"
           >Overlay (mp4v)</a>
           <a v-if="result.urls.foregroundMask" :href="result.urls.foregroundMask" download>Foreground</a>
         </div>

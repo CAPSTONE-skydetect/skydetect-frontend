@@ -401,7 +401,6 @@ const timeLabel = computed(() => {
             <button @click="showOverlay = !showOverlay">
               {{ showOverlay ? '지정 박스 보기' : '추적 오버레이 보기' }}
             </button>
-            <span class="faint">초록 박스가 프레임별 검출, 파란 선이 궤적</span>
           </template>
 
           <template v-else-if="state === 'ANALYSIS_FAILED'">

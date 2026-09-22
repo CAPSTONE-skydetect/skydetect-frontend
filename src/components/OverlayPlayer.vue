@@ -116,7 +116,7 @@ const timeLabel = computed(() => {
       />
 
       <div v-if="!track" class="player__empty">
-        <p class="faint">추적을 실행하면 궤적이 여기에 재생된다</p>
+        <p class="faint">ROI 추적 전</p>
       </div>
     </div>
 
