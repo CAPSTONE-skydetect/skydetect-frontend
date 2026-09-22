@@ -2,7 +2,7 @@
 /**
  * 로그인 화면.
  *
- * 폼 제출이 곧 이 앱의 첫 POST 다. App.vue 가 시작할 때 GET /api/auth/me 로
+ * 폼 제출이 이 앱의 첫 POST 다. App.vue 가 시작할 때 GET /api/auth/me 로
  * XSRF-TOKEN 쿠키를 받아둔 덕분에 http 래퍼가 헤더를 붙일 수 있다.
  * 그 GET 이 없으면 여기서 바로 403 이 난다.
  */
@@ -36,15 +36,14 @@ async function onSubmit() {
 }
 
 /**
- * 에러를 사용자가 읽을 문장으로 바꾼다.
- * 특히 403(CSRF)은 "비밀번호 틀림"과 전혀 다른 문제라 구분해서 말해줘야
- * 개발 중에 엉뚱한 곳을 뒤지지 않는다.
+ * 403(CSRF)은 비밀번호 틀림과 전혀 다른 문제라 구분해서 보여준다.
+ * 안 그러면 개발 중에 엉뚱한 곳을 뒤지게 된다.
  */
 function messageFor(err) {
-  if (err.status === 0) return '서버에 연결할 수 없다. 백엔드(8080)가 떠 있는지 확인해라.'
+  if (err.status === 0) return '서버에 연결할 수 없습니다. 백엔드(8080)를 확인하세요.'
   if (err.code === 'LOGIN_FAILED') return err.message
-  if (err.status === 403) return 'CSRF 토큰 문제로 거부됐다. 새로고침 후 다시 시도해라.'
-  return err.message || '로그인에 실패했다.'
+  if (err.status === 403) return 'CSRF 토큰 오류입니다. 새로고침 후 다시 시도하세요.'
+  return err.message || '로그인에 실패했습니다.'
 }
 </script>
 
@@ -57,7 +56,7 @@ function messageFor(err) {
       </div>
 
       <p v-if="sessionExpired" class="login__notice">
-        세션이 만료되어 로그아웃됐다. 다시 로그인해라.
+        세션이 만료되었습니다. 다시 로그인하세요.
       </p>
 
       <label class="login__field">
@@ -74,7 +73,7 @@ function messageFor(err) {
 
       <button class="login__submit" type="submit" :disabled="!canSubmit">
         <span v-if="submitting" class="spinner" />
-        <span>{{ submitting ? '확인 중…' : '로그인' }}</span>
+        <span>{{ submitting ? '확인 중' : '로그인' }}</span>
       </button>
     </form>
   </div>

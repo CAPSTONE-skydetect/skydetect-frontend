@@ -30,9 +30,7 @@ export class NetworkError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
 // CSRF
-// ---------------------------------------------------------------------------
 
 /**
  * XSRF-TOKEN 쿠키를 읽는다.
@@ -50,9 +48,7 @@ function needsCsrf(method) {
   return !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())
 }
 
-// ---------------------------------------------------------------------------
 // 401 전역 처리
-// ---------------------------------------------------------------------------
 
 let unauthorizedHandler = null
 
@@ -66,9 +62,7 @@ export function setUnauthorizedHandler(handler) {
   unauthorizedHandler = handler
 }
 
-// ---------------------------------------------------------------------------
 // 본체
-// ---------------------------------------------------------------------------
 
 /**
  * @param {string} path      '/api/...' 형태의 same-origin 경로 (Vite 프록시가 백엔드로 넘긴다)
@@ -127,7 +121,7 @@ export async function request(path, options = {}) {
 
   if (response.status === 403 && !readCsrfToken()) {
     throw new ApiError(403, 'CSRF_TOKEN_MISSING',
-      'CSRF 토큰이 없어 요청이 거부됐다. 앱 시작 시 GET /api/auth/me 가 호출됐는지 확인해라.', payload)
+      'CSRF 토큰이 없어 요청이 거부되었습니다. 앱 시작 시 GET /api/auth/me 가 호출됐는지 확인하세요.', payload)
   }
 
   throw new ApiError(

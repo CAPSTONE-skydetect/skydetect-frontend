@@ -21,7 +21,7 @@ onMounted(initialize)
 <template>
   <div v-if="!ready" class="boot">
     <div class="spinner" />
-    <span class="dim">세션 확인 중…</span>
+    <span class="dim">세션 확인 중</span>
   </div>
 
   <LoginView v-else-if="!user" />

@@ -2,14 +2,14 @@
 /**
  * 클립 위에 박스를 그리는 <canvas> 오버레이.
  *
- * ── 이 컴포넌트의 존재 이유 ────────────────────────────────────────────────
- * 사용자가 그린 건 **화면 좌표**지만 서버로 보내야 하는 건 **원본 영상 픽셀 좌표**다.
+ * 이 컴포넌트의 존재 이유
+ * 사용자가 그린 건 화면 좌표지만 서버로 보내야 하는 건 원본 영상 픽셀 좌표다.
  * 이 변환이 틀려도 화면은 멀쩡해 보인다. 박스는 마우스를 따라 잘 그려지니까.
  * 어긋난 건 AI 에 도착한 뒤에야 드러난다.
  *
  * 그래서 여기서는 그린 사각형을 그대로 보여주지 않는다.
  *   1. 드래그 중에는 화면 좌표 그대로 (흰 점선)
- *   2. 손을 떼면 → 원본 좌표로 변환 → **다시 화면 좌표로 되돌려서** 그린다 (파란 실선)
+ *   2. 손을 떼면 → 원본 좌표로 변환 → 다시 화면 좌표로 되돌려서 그린다 (파란 실선)
  * 두 사각형이 어긋나면 변환이 틀린 것이다. 눈으로 바로 보인다.
  *
  * 레터박스(object-fit: contain 여백)도 얇게 그려준다. 영상 밖 여백에 박스를
@@ -21,7 +21,7 @@ import { createFitTransform, rectToSource, rectToDisplay } from '../lib/videoGeo
 const props = defineProps({
   /** 기준이 되는 <video>. videoWidth/clientWidth 를 여기서 읽는다. */
   videoEl: { type: Object, default: null },
-  /** 확정된 박스. **원본 픽셀 좌표** {x, y, width, height} */
+  /** 확정된 박스. 원본 픽셀 좌표 {x, y, width, height} */
   sourceBox: { type: Object, default: null },
   disabled: { type: Boolean, default: false },
 })
@@ -54,7 +54,7 @@ const transform = computed(() => {
   })
 })
 
-// --- 드래그 ------------------------------------------------------------------
+// 드래그
 
 function pointerPosition(event) {
   const rect = canvasEl.value.getBoundingClientRect()
@@ -107,7 +107,7 @@ function onPointerUp(event) {
   render()
 }
 
-// --- 그리기 ------------------------------------------------------------------
+// 그리기
 
 function render() {
   const canvas = canvasEl.value
@@ -148,7 +148,7 @@ function render() {
     ctx.setLineDash([])
   }
 
-  // 3) 확정된 박스 — **원본 좌표에서 되돌려 그린 것**. 검증용.
+  // 3) 확정된 박스 — 원본 좌표에서 되돌려 그린 것. 검증용.
   if (props.sourceBox) {
     const back = rectToDisplay(tf, props.sourceBox)
     ctx.strokeStyle = '#4da3ff'
@@ -181,7 +181,7 @@ function formatBox(box) {
   return `${round(box.x)}, ${round(box.y)}  ${round(box.width)}×${round(box.height)} px`
 }
 
-// --- 크기/메타데이터 변화 추적 -------------------------------------------------
+// 크기/메타데이터 변화 추적
 
 function invalidate() {
   geometryVersion.value += 1

@@ -2,10 +2,9 @@
 /**
  * 왼쪽 패널 — 라이브 스트림.
  *
- * 이 패널의 규칙은 하나다: **무슨 일이 있어도 멈추지 않는다.**
- * 오른쪽에서 클립을 기다리든 분석이 돌든, 왼쪽은 계속 흘러야 하고
- * 트리거 버튼도 계속 눌려야 한다 (여러 클립이 동시에 PENDING 일 수 있다).
- * 그래서 트리거 버튼의 disabled 는 "요청을 보내는 순간"에만 걸린다.
+ * 규칙은 하나다. 무슨 일이 있어도 멈추지 않는다.
+ * 오른쪽에서 클립을 기다리든 분석이 돌든 왼쪽은 계속 흐르고 검출 버튼도 계속
+ * 눌려야 한다. 그래서 버튼의 disabled 는 요청을 보내는 순간에만 걸린다.
  */
 import { ref } from 'vue'
 import { useHls } from '../composables/useHls.js'
@@ -23,7 +22,7 @@ async function onTrigger() {
   try {
     await props.session.trigger()
   } catch {
-    // 에러는 session.triggerError 로 화면에 뜬다. 여기서 다시 던지지 않는다.
+    // 에러는 session.triggerError 로 화면에 뜬다.
   }
 }
 </script>
@@ -52,14 +51,13 @@ async function onTrigger() {
 
     <div class="panel__body">
       <div class="live__stage">
-        <!-- muted 없으면 브라우저 자동재생 정책에 막힌다. 관제 영상에 소리는 필요 없다. -->
+        <!-- muted 가 없으면 브라우저 자동재생 정책에 막힌다. 관제 영상에 소리는 필요 없다. -->
         <video ref="videoEl" class="live__video" muted playsinline loop autoplay />
 
-        <!-- 멈춤과 고장을 구분해서 보여준다.
-             탭을 백그라운드로 보내면 브라우저가 무음 영상을 절전 정지시키는데,
-             그걸 "스트림 오류"로 그리면 멀쩡한 서버를 의심하게 된다. -->
+        <!-- 멈춤과 고장을 구분한다. 탭을 백그라운드로 보내면 브라우저가 무음 영상을
+             절전 정지시키는데, 그걸 스트림 오류로 그리면 멀쩡한 서버를 의심하게 된다. -->
         <div v-if="status === 'paused' || status === 'blocked'" class="live__overlay">
-          <p class="dim">{{ error?.message || '재생이 멈췄다.' }}</p>
+          <p class="dim">{{ error?.message || '재생이 멈췄습니다.' }}</p>
           <button @click="resume">재생</button>
         </div>
 
@@ -74,18 +72,10 @@ async function onTrigger() {
         <button class="live__trigger" :disabled="session.triggering.value" @click="onTrigger">
           <span v-if="session.triggering.value" class="spinner" />
           <span v-else class="live__trigger-dot" />
-          검출 트리거
+          검출
         </button>
 
-        <div class="live__hint">
-          <p class="dim">
-            누른 시각 기준 <b>-3초 ~ +10초</b> 구간을 잘라낸다.
-          </p>
-          <p class="faint">
-            +10초는 아직 오지 않은 시간이라, 클립이 뜨기까지 최소 10초가 걸린다.
-            기다리는 동안에도 계속 눌러도 된다.
-          </p>
-        </div>
+        <span class="dim live__hint">누른 시각 기준 -3초 ~ +10초 구간을 분석</span>
 
         <div style="flex: 1" />
 
@@ -95,7 +85,7 @@ async function onTrigger() {
       </div>
 
       <p v-if="session.triggerError.value" class="live__error">
-        트리거 실패: {{ session.triggerError.value.message }}
+        {{ session.triggerError.value.message }}
       </p>
     </div>
   </section>
@@ -146,7 +136,7 @@ async function onTrigger() {
   align-items: center;
   gap: 9px;
   font-weight: 700;
-  padding: 11px 18px;
+  padding: 11px 22px;
   background: #7f1d1d;
   border-color: #b91c1c;
   white-space: nowrap;
@@ -157,7 +147,7 @@ async function onTrigger() {
   background: #fca5a5;
   box-shadow: 0 0 0 3px #fca5a533;
 }
-.live__hint p { margin: 0; font-size: 12px; }
+.live__hint { font-size: 12px; }
 .live__error {
   margin: 0;
   padding: 10px 14px;

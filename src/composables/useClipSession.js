@@ -5,13 +5,12 @@
  *   IDLE → CLIP_PENDING → CLIP_READY → ANALYZING → DONE
  * 는 "오른쪽 패널이 지금 보여주는 클립 하나"의 상태를 그대로 따라간다.
  *
- * ── 여기가 이 파일의 핵심 설계 지점 ──────────────────────────────────────
- * 클립은 동시에 여러 개가 PENDING 일 수 있는데(대기 중에도 트리거를 또 누를 수
- * 있어야 한다), 오른쪽 패널은 하나뿐이다. 그래서 클립을 **큐**로 들고,
+ * 클립은 동시에 여러 개가 PENDING 일 수 있는데(대기 중에도 검출을 또 누를 수
+ * 있어야 한다), 오른쪽 패널은 하나뿐이다. 그래서 클립을 큐로 들고,
  * 패널은 그중 "선택된 하나"에 묶는다.
  *
- * 자동 선택 규칙은 하나다: **작업 중인 화면을 빼앗지 않는다.**
- *   - 패널이 비어 있으면(IDLE) 새 트리거를 바로 선택해 대기 화면을 보여준다
+ * 자동 선택 규칙은 하나다: 작업 중인 화면을 빼앗지 않는다.
+ *   - 패널이 비어 있으면(IDLE) 새 검출을 바로 선택해 대기 화면을 보여준다
  *   - 박스를 그리는 중이거나 분석 중/결과를 보는 중이면 새 클립은 큐에 쌓아두고
  *     뱃지만 띄운다. 사용자가 직접 고르면 그때 바꾼다
  * 이게 없으면 결과를 읽는 도중 다음 클립이 화면을 덮어버린다.
@@ -41,7 +40,7 @@ export function useClipSession() {
   )
 
   /**
-   * 화면 상태. 어디에도 따로 저장하지 않고 선택된 클립에서 **파생**시킨다.
+   * 화면 상태. 어디에도 따로 저장하지 않고 선택된 클립에서 파생시킨다.
    * 상태를 따로 들면 클립 상태와 화면 상태가 어긋나는 순간이 반드시 생긴다.
    */
   const screenState = computed(() => {
@@ -63,7 +62,7 @@ export function useClipSession() {
   // --- 트리거 ---------------------------------------------------------------
 
   /**
-   * 검출 트리거. 누른 순간 -3초는 이미 서버에 있고, +10초는 아직 미래다.
+   * 검출. 누른 순간 -3초는 이미 서버에 있고 +10초는 아직 미래다.
    * 그래서 응답은 즉시 오지만 클립은 아직 없다 (202 PENDING).
    */
   async function trigger() {
@@ -127,8 +126,9 @@ export function useClipSession() {
    * 분석 요청.
    * @param {string} clipId
    * @param {{initFrameIndex:number, targetBbox:[number,number,number,number]}} payload
+   * @param {{videoUrl?:string}} [context]  AI 직결 경로에서 클립 영상을 올릴 때 쓴다
    */
-  async function requestAnalysis(clipId, payload) {
+  async function requestAnalysis(clipId, payload, context) {
     patchClip(clipId, (entry) => ({
       ...entry,
       analysisError: null,
@@ -137,7 +137,7 @@ export function useClipSession() {
     }))
 
     try {
-      const created = await createAnalysis(clipId, payload)
+      const created = await createAnalysis(clipId, payload, context)
       patchClip(clipId, (entry) => ({
         ...entry,
         analysis: { ...entry.analysis, ...created },

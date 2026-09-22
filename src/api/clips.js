@@ -1,14 +1,13 @@
 /**
  * 클립 API.
  *
- * 백엔드 미구현 구간이다. USE_MOCK 이 true 면 mock, false 면 실제 호출로 간다.
- * 호출부(composable/컴포넌트)는 둘의 차이를 모른다 — 나중에 실서버로 바꾸는 작업이
- * .env 한 줄이 되도록 경계를 여기에 둔다.
+ * 백엔드 미구현 구간이다. CLIP_SOURCE 가 경로를 고르고, 호출부는 차이를 모른다.
+ * 실서버로 바꾸는 작업이 .env 한 줄이 되도록 경계를 여기에 둔다.
  *
- * ⚠ 아래 real 구현의 경로/필드는 **제안 명세**지 확정이 아니다. 백엔드와 맞춰야 한다.
+ * 아래 실서버 경로/필드는 제안 명세지 확정이 아니다. docs/api-questions.md 참고.
  */
 import { http } from './http.js'
-import { USE_MOCK } from './config.js'
+import { CLIP_SOURCE } from './config.js'
 import * as mock from './mock/mockBackend.js'
 
 /**
@@ -16,16 +15,13 @@ import * as mock from './mock/mockBackend.js'
  * @returns {Promise<{clipId: string, status: 'PENDING', readyAt: string}>} 202
  */
 export function createClip() {
-  if (USE_MOCK) return mock.createClip()
+  if (CLIP_SOURCE === 'mock') return mock.createClip()
   return http.post('/api/clips', { json: {} })
 }
 
-/**
- * 클립 상태 조회. PENDING 인 동안 폴링한다.
- * @returns {Promise<ClipDto>}
- */
+/** 클립 상태 조회. PENDING 인 동안 폴링한다. */
 export function fetchClip(clipId) {
-  if (USE_MOCK) return mock.fetchClip(clipId)
+  if (CLIP_SOURCE === 'mock') return mock.fetchClip(clipId)
   return http.get(`/api/clips/${encodeURIComponent(clipId)}`)
 }
 

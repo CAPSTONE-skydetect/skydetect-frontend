@@ -2,14 +2,10 @@
 /**
  * 클립 큐.
  *
- * 왜 필요한가: 오른쪽 패널은 하나뿐인데 클립은 동시에 여러 개가 PENDING 일 수 있다
- * (대기 중에도 트리거를 또 누를 수 있어야 하므로). 큐가 없으면
- *   - 두 번째 트리거가 첫 번째를 덮어쓰거나
- *   - 결과를 읽는 중에 새 클립이 화면을 가로채거나
- * 둘 중 하나가 된다. 그래서 진행 중인 클립을 전부 여기 늘어놓고,
- * 패널에 무엇을 띄울지는 사용자가 고른다.
- *
- * 세션 동안의 분석 이력 역할도 겸한다 (끝난 클립은 결과 라벨을 달고 남는다).
+ * 오른쪽 패널은 하나뿐인데 클립은 동시에 여러 개가 PENDING 일 수 있다.
+ * 큐가 없으면 두 번째 검출이 첫 번째를 덮어쓰거나, 결과를 읽는 중에 새 클립이
+ * 화면을 가로챈다. 그래서 진행 중인 클립을 전부 여기 늘어놓고 패널에 무엇을
+ * 띄울지는 사용자가 고른다. 끝난 클립은 결과 라벨을 달고 남아 이력 역할도 한다.
  */
 import { computed } from 'vue'
 
@@ -53,11 +49,10 @@ function timeOf(clip) {
       <span class="panel__title">클립 큐</span>
       <span class="faint">{{ clips.length }}건</span>
       <div style="flex: 1" />
-      <span class="faint queue__hint">클릭하면 오른쪽 패널에 띄운다</span>
     </div>
 
     <div class="queue__list">
-      <p v-if="!clips.length" class="faint queue__empty">아직 트리거한 클립이 없다.</p>
+      <p v-if="!clips.length" class="faint queue__empty">비어 있음</p>
 
       <button
         v-for="clip in clips"

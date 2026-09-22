@@ -1,7 +1,7 @@
 /**
  * 아직 백엔드에 없는 클립/분석 API 를 흉내 내는 인메모리 가짜 서버.
  *
- * 목적은 "화면이 그려진다"가 아니라 **대기 UI 를 제대로 만드는 것**이다.
+ * 목적은 "화면이 그려진다"가 아니라 대기 UI 를 제대로 만드는 것이다.
  * 그래서 지연을 실제와 같게 준다.
  *   - 클립: 트리거 +10초가 아직 미래라서 최소 10초를 기다려야 한다
  *   - 분석: 수 초 ~ 수십 초
@@ -12,7 +12,7 @@
  * (src/api/clips.js / analyses.js 의 real 구현과 1:1 대응)
  */
 
-// --- 시나리오 상수 -----------------------------------------------------------
+// 시나리오 상수
 
 /** 트리거 기준 잘라내는 구간. -3초 ~ +10초 = 13초. */
 export const CLIP_PRE_ROLL_MS = 3_000
@@ -32,7 +32,7 @@ const ANALYSIS_QUEUE_MS = 1_200          // PENDING → RUNNING
 const ANALYSIS_MIN_RUN_MS = 3_000        // RUNNING → DONE (하한)
 const ANALYSIS_MAX_RUN_MS = 7_000        // RUNNING → DONE (상한)
 
-// --- 저장소 ------------------------------------------------------------------
+// 저장소
 
 const clips = new Map()
 const analyses = new Map()
@@ -59,7 +59,7 @@ let labelCursor = 0
 const REJECT_CYCLE = ['short_track', 'low_confidence', 'high_noise']
 let rejectCursor = 0
 
-// --- 클립 --------------------------------------------------------------------
+// 클립
 
 /** POST /api/clips */
 export async function createClip() {
@@ -107,7 +107,7 @@ export async function fetchClip(clipId) {
   }
 }
 
-// --- 분석 --------------------------------------------------------------------
+// 분석
 
 /** POST /api/clips/{clipId}/analysis */
 export async function createAnalysis(clipId, { initFrameIndex, targetBbox }) {
@@ -219,7 +219,7 @@ function buildResult(record) {
   }
 }
 
-// --- 도우미 ------------------------------------------------------------------
+// 도우미
 
 function assertBboxInsideFrame([x, y, w, h]) {
   const inside =
@@ -232,7 +232,7 @@ function assertBboxInsideFrame([x, y, w, h]) {
   if (!inside) {
     const error = new Error(
       `targetBbox 가 원본 프레임(${MOCK_CLIP_WIDTH}×${MOCK_CLIP_HEIGHT}) 밖이다: ` +
-      `[${[x, y, w, h].map((n) => Math.round(n)).join(', ')}]. 좌표 변환을 확인해라.`,
+      `[${[x, y, w, h].map((n) => Math.round(n)).join(', ')}]. 좌표 변환을 확인하세요.`,
     )
     error.status = 422
     error.code = 'BBOX_OUT_OF_RANGE'
@@ -241,7 +241,7 @@ function assertBboxInsideFrame([x, y, w, h]) {
 }
 
 function notFound(what) {
-  const error = new Error(`${what} 를 찾을 수 없다.`)
+  const error = new Error(`${what} 를 찾을 수 없습니다.`)
   error.status = 404
   error.code = 'NOT_FOUND'
   return error

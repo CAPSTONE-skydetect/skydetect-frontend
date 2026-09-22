@@ -43,7 +43,7 @@ export function useHls(videoRef, sourceRef) {
     status.value = 'loading'
     error.value = null
 
-    // 순서에 주의: **hls.js 를 먼저** 본다.
+    // 순서에 주의: hls.js 를 먼저 본다.
     //
     // 흔한 구현은 canPlayType('application/vnd.apple.mpegurl') 을 먼저 보고
     // 참이면 네이티브로 가는데, Chromium 계열이 이 값으로 'maybe' 를 돌려준다.
@@ -61,7 +61,7 @@ export function useHls(videoRef, sourceRef) {
       }
       engine.value = 'none'
       status.value = 'error'
-      error.value = new Error('이 브라우저는 HLS 재생을 지원하지 않는다.')
+      error.value = new Error('이 브라우저는 HLS 재생을 지원하지 않습니다.')
       return
     }
 
@@ -85,7 +85,7 @@ export function useHls(videoRef, sourceRef) {
       switch (data.type) {
         case Hls.ErrorTypes.NETWORK_ERROR:
           status.value = 'error'
-          error.value = new Error(`스트림을 불러오지 못했다 (${data.details})`)
+          error.value = new Error(`스트림을 불러오지 못했습니다 (${data.details})`)
           hls.startLoad()
           break
         case Hls.ErrorTypes.MEDIA_ERROR:
@@ -124,7 +124,7 @@ export function useHls(videoRef, sourceRef) {
       if (err.name === 'NotAllowedError') {
         // 자동재생 정책. muted 라 보통은 통과하지만, 막히면 사용자 클릭이 필요하다.
         status.value = 'blocked'
-        error.value = new Error('브라우저가 자동 재생을 막았다. 재생을 눌러라.')
+        error.value = new Error('브라우저가 자동 재생을 막았습니다.')
         return
       }
       status.value = 'error'
