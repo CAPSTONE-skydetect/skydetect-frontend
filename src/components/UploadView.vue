@@ -54,6 +54,8 @@ const running = ref(false)
 const runError = ref(null)
 const elapsed = ref(0)
 const result = ref(null)
+const lastRequest = ref(null)
+const showDebug = ref(false)
 
 let elapsedTimer = null
 
@@ -243,25 +245,30 @@ async function run() {
 
   // 결과가 온 뒤에는 영상이 다른 프레임에 가 있을 수 있으니 지금 찍어둔다.
   const thumbnail = captureThumbnail(videoEl.value, { box: sourceBox.value })
+  // CODEX 는 반올림 없이 실수 그대로 보낸다. 같은 입력이면 같은 결과가 나와야
+  // 하므로 여기서도 반올림하지 않는다.
   const bbox = [
-    Math.round(sourceBox.value.x),
-    Math.round(sourceBox.value.y),
-    Math.round(sourceBox.value.width),
-    Math.round(sourceBox.value.height),
+    sourceBox.value.x,
+    sourceBox.value.y,
+    sourceBox.value.width,
+    sourceBox.value.height,
   ]
   const initFrame = selectionFrame.value ?? frameIndex.value
 
+  const request = {
+    sourceVideoId: uploaded.value.source_video_id,
+    videoPath: uploaded.value.video_path,
+    initFrameIndex: initFrame,
+    targetBbox: bbox,
+    stabilize: options.value.stabilize,
+    resizeWidth: options.value.resizeWidth,
+    maxSeconds: options.value.maxSeconds,
+    tuning: { ...tuning.value },
+  }
+  lastRequest.value = request
+
   try {
-    const response = await runManualTracking({
-      sourceVideoId: uploaded.value.source_video_id,
-      videoPath: uploaded.value.video_path,
-      initFrameIndex: initFrame,
-      targetBbox: bbox,
-      stabilize: options.value.stabilize,
-      resizeWidth: options.value.resizeWidth,
-      maxSeconds: options.value.maxSeconds,
-      tuning: tuning.value,
-    })
+    const response = await runManualTracking(request)
 
     const elapsedMs = Date.now() - startedAt
     const analysis = toAnalysisDto(response.prediction, { elapsedMs })
@@ -369,6 +376,42 @@ function pct(value) {
   return Number.isFinite(value) ? Math.round(value * 100) + '%' : '-'
 }
 
+/**
+ * AI 로 보낸 값과 돌아온 핵심 값을 그대로 보여준다.
+ * 다른 UI 와 결과가 다를 때 어디가 다른지 여기서 바로 맞춰볼 수 있다.
+ */
+const debugText = computed(() => {
+  const r = lastRequest.value
+  if (!r) return ''
+  return JSON.stringify({
+    request: {
+      init_frame_index: r.initFrameIndex,
+      target_bbox: r.targetBbox,
+      stabilize: r.stabilize,
+      resize_width: r.resizeWidth,
+      max_seconds: r.maxSeconds,
+      tuning: {
+        klt_accept_conf: r.tuning.kltAcceptConf,
+        recovery_conf: r.tuning.recoveryConf,
+        update_conf: r.tuning.updateConf,
+        search_radius_multiplier: r.tuning.searchRadius,
+        online_update_enabled: r.tuning.onlineUpdate,
+      },
+    },
+    response: result.value ? {
+      run_id: result.value.metadata?.run_id,
+      init_frame_index: result.value.metadata?.init_frame_index,
+      coordinate_mode: result.value.metadata?.coordinate_mode,
+      label: result.value.analysis?.label,
+      confidence: result.value.analysis?.confidence,
+      quality: result.value.track?.quality,
+      metrics: result.value.metrics,
+      first_point: result.value.track?.history?.[0],
+      last_point: result.value.track?.history?.at(-1),
+    } : null,
+  }, null, 2)
+})
+
 const elapsedLabel = computed(() => (elapsed.value / 1000).toFixed(0) + '초')
 const currentSeconds = computed(() => (frameIndex.value / (fps.value || 30)).toFixed(2))
 
@@ -377,7 +420,11 @@ watch(objectUrl, () => { result.value = null })
 
 <template>
   <main class="upload">
-    <div class="upload__top">
+    <!-- 선택 중에는 원본을 전체 폭으로 넓힌다.
+         ROI 는 원본 픽셀 단위라, 영상이 작게 보이면 화면 1px 이 원본 여러 px 을
+         가리켜 클릭이 몇 px 만 빗나가도 대상에서 벗어난다. 그때 오버레이
+         재생기는 볼 일이 없으므로 자리를 내준다. -->
+    <div class="upload__top" :class="{ 'upload__top--focus': selectionMode }">
       <!-- 왼쪽: 원본 + ROI 지정 -->
       <section class="panel">
         <div class="panel__head">
@@ -442,53 +489,6 @@ watch(objectUrl, () => { result.value = null })
               </span>
             </div>
 
-            <!-- 초기 객체 지정. CODEX 의 TARGET SETUP 과 같은 값들이다. -->
-            <div class="upload__roi">
-              <label class="field">
-                <span class="dim">시작 프레임</span>
-                <input
-                  type="number" min="0" :max="lastFrame"
-                  :value="selectionFrame ?? frameIndex"
-                  @change="seekToFrame(Number($event.target.value))"
-                />
-              </label>
-              <label class="field">
-                <span class="dim">현재 시간 (초)</span>
-                <input
-                  type="number" min="0" step="0.01" :value="currentSeconds"
-                  @change="seekToSeconds(Number($event.target.value))"
-                />
-              </label>
-              <label class="field">
-                <span class="dim">중심 X</span>
-                <input
-                  type="number" step="1" :value="boxFields.centerX" :disabled="!sourceBox"
-                  @change="setBoxField('centerX', $event.target.value)"
-                />
-              </label>
-              <label class="field">
-                <span class="dim">중심 Y</span>
-                <input
-                  type="number" step="1" :value="boxFields.centerY" :disabled="!sourceBox"
-                  @change="setBoxField('centerY', $event.target.value)"
-                />
-              </label>
-              <label class="field">
-                <span class="dim">bbox W</span>
-                <input
-                  type="number" min="4" step="1" :value="boxFields.width" :disabled="!sourceBox"
-                  @change="setBoxField('width', $event.target.value)"
-                />
-              </label>
-              <label class="field">
-                <span class="dim">bbox H</span>
-                <input
-                  type="number" min="4" step="1" :value="boxFields.height" :disabled="!sourceBox"
-                  @change="setBoxField('height', $event.target.value)"
-                />
-              </label>
-            </div>
-
             <div class="upload__select">
               <button
                 class="upload__select-btn"
@@ -512,7 +512,7 @@ watch(objectUrl, () => { result.value = null })
       </section>
 
       <!-- 오른쪽: 추적 오버레이 재생 -->
-      <section class="panel">
+      <section v-show="!selectionMode" class="panel">
         <div class="panel__head">
           <span class="panel__title">추적 오버레이</span>
           <span v-if="running" class="badge badge--warn">
@@ -540,8 +540,63 @@ watch(objectUrl, () => { result.value = null })
       </section>
     </div>
 
-    <!-- 아래: 추적 설정 + 실행 + 결과 -->
+    <!-- 아래: 초기 객체 지정 + 추적 설정 + 실행 + 결과 -->
     <section class="panel upload__bottom">
+      <div class="target">
+        <span class="target__title">초기 객체 지정</span>
+        <div class="target__fields">
+          <label class="field">
+            <span class="dim">시작 프레임</span>
+            <input
+              type="number" min="0" :max="lastFrame"
+              :value="selectionFrame ?? frameIndex"
+              :disabled="!uploaded || running"
+              @change="seekToFrame(Number($event.target.value))"
+            />
+          </label>
+          <label class="field">
+            <span class="dim">현재 시간 (초)</span>
+            <input
+              type="number" min="0" step="0.01" :value="currentSeconds"
+              :disabled="!uploaded || running"
+              @change="seekToSeconds(Number($event.target.value))"
+            />
+          </label>
+          <label class="field">
+            <span class="dim">중심 X</span>
+            <input
+              type="number" step="1" :value="boxFields.centerX"
+              :disabled="!sourceBox || running"
+              @change="setBoxField('centerX', $event.target.value)"
+            />
+          </label>
+          <label class="field">
+            <span class="dim">중심 Y</span>
+            <input
+              type="number" step="1" :value="boxFields.centerY"
+              :disabled="!sourceBox || running"
+              @change="setBoxField('centerY', $event.target.value)"
+            />
+          </label>
+          <label class="field">
+            <span class="dim">bbox W</span>
+            <input
+              type="number" min="4" step="1" :value="boxFields.width"
+              :disabled="!sourceBox || running"
+              @change="setBoxField('width', $event.target.value)"
+            />
+          </label>
+          <label class="field">
+            <span class="dim">bbox H</span>
+            <input
+              type="number" min="4" step="1" :value="boxFields.height"
+              :disabled="!sourceBox || running"
+              @change="setBoxField('height', $event.target.value)"
+            />
+          </label>
+        </div>
+      </div>
+
       <TrackingTuning
         v-model:tuning="tuning"
         v-model:options="options"
@@ -582,6 +637,13 @@ watch(objectUrl, () => { result.value = null })
           </template>
         </dl>
       </template>
+
+      <div v-if="lastRequest" class="debug">
+        <button class="debug__toggle" @click="showDebug = !showDebug">
+          {{ showDebug ? '요청 원본 닫기' : '요청 원본' }}
+        </button>
+        <pre v-if="showDebug" class="debug__body mono">{{ debugText }}</pre>
+      </div>
     </section>
 
     <input
@@ -605,9 +667,17 @@ watch(objectUrl, () => { result.value = null })
 }
 .upload__top {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* 왼쪽(ROI 지정)이 정밀 작업이라 조금 더 넓게 준다. */
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 12px;
-  min-height: 560px;
+  /* 영상이 클수록 클릭 한 픽셀이 가리키는 원본 픽셀이 줄어 ROI 가 정확해진다. */
+  min-height: 700px;
+}
+/* 선택 중에는 높이도 화면만큼 키운다. 가로만 넓히면 contain 때문에 세로에
+   막혀 배율이 그대로다. */
+.upload__top--focus {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 92vh;
 }
 .upload__bottom { flex: none; }
 .upload__file { display: none; }
@@ -654,14 +724,6 @@ watch(objectUrl, () => { result.value = null })
 .upload__range { flex: 1; accent-color: var(--accent); width: auto; }
 .upload__frame { font-size: 12px; white-space: nowrap; }
 
-.upload__roi {
-  flex: none;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
-}
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
 .field input { padding: 6px 8px; font-size: 12px; }
 
@@ -700,6 +762,31 @@ watch(objectUrl, () => { result.value = null })
   text-align: center;
 }
 .upload__waiting p { margin: 0; }
+
+.target { padding: 14px 14px 0; }
+.target__title { font-weight: 600; font-size: 13px; }
+.target__fields {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.debug { padding: 0 14px 14px; }
+.debug__toggle { padding: 4px 12px; font-size: 11px; background: transparent; }
+.debug__body {
+  margin: 10px 0 0;
+  padding: 12px;
+  background: #05080c;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 
 .upload__actions {
   display: flex;
@@ -747,6 +834,6 @@ watch(objectUrl, () => { result.value = null })
 @media (max-width: 1100px) {
   .upload__top { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .upload__top > * { min-height: 420px; }
-  .upload__roi { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .target__fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 </style>
