@@ -142,7 +142,39 @@ AI 쪽에서 고치려면 fourcc 를 `avc1` 로 바꾸거나 ffmpeg 로 H.264 �
 한 번 거치면 된다. 다만 OpenCV 의 `avc1` 은 플랫폼마다 openh264 가 있어야 해서
 ffmpeg 쪽이 안전해 보인다. AI 레포 일이라 건드리지 않았다.
 
-## 11. 같은 영상인데 CODEX UI 와 판정이 다를 때
+## 11. TrackSequence.history 는 화면에 겹쳐 그릴 좌표가 아니다
+
+`tracking_adapter._to_track_point` 를 보면
+
+```python
+x = observation.compensated_x if stabilize else observation.raw_x
+```
+
+`stabilize` 가 기본 true 라 `TrackSequence.history` 의 cx/cy 는 카메라 움직임
+보정(CMC) 좌표다. 흔들림을 걷어낸 가상의 기준계라, 실제 프레임에서 물체가 보이는
+자리가 아니다. AI 자신의 overlay.mp4 는 `raw_x/raw_y` 로 그린다.
+
+실측 (1920x1440 원본, 대상 bbox 26x19px)
+
+| | 값 |
+| --- | --- |
+| history(보정) vs trajectory(raw) 최대 차이 | x 43px, y 66px |
+| 대상 bbox 크기 | 26x19px |
+
+박스 두세 개만큼 어긋난다. 카메라가 고정된 영상에서는 두 좌표가 같아서 티가 안
+나고, 흔들리는 영상에서만 드러난다.
+
+- 프론트: 화면 오버레이는 `trajectory.csv` 의 `raw_x/raw_y/bbox_width/bbox_height`
+  를 쓴다. `history` 는 CSV 를 못 받았을 때의 대비책으로만 남겼다
+- CSV 에는 놓친 프레임(`visible=False`, `tracking_source=prediction`)도 들어 있어
+  159행인데 history 는 146개다. 궤적선은 `visible` 인 점만 잇는다 (AI 오버레이와 같다)
+
+확인 필요 - `history` 가 보정 좌표라는 게 의도한 계약인지. 피처 계산에는 보정
+좌표가 맞지만, 화면에 겹쳐 그리려는 쪽은 반드시 raw 가 필요하다. 응답에 두 좌표를
+같이 싣거나 최소한 `coordinate_mode` 를 TrackSequence 안에도 넣어주면 좋겠다.
+(지금은 `metadata.coordinate_mode` 에만 있다)
+
+## 12. 같은 영상인데 CODEX UI 와 판정이 다를 때
 
 판정은 AI 가 내린다. 프론트가 바꿀 수 있는 건 보내는 값뿐이라, 결과가 다르면
 payload 가 다른 것이다. 확인 순서를 적어둔다.
@@ -162,7 +194,7 @@ payload 가 다른 것이다. 확인 순서를 적어둔다.
 - `target_bbox` 를 반올림하지 않고 실수 그대로 보낸다. CODEX 와 같다
 - `요청 원본` 패널로 보낸 값과 받은 값을 그대로 볼 수 있게 했다
 
-## 12. 분석 이력 `GET /api/analyses`
+## 13. 분석 이력 `GET /api/analyses`
 
 API 클라이언트 함수(`fetchAnalysisHistory`)는 만들어뒀지만 **화면은 만들지
 않았다.** 요청 범위(1~8단계)에 없었다. 현재 세션 동안의 이력은 클립 큐가 대신

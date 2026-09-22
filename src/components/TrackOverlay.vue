@@ -2,45 +2,50 @@
 /**
  * A 파트 추적 결과를 영상 위에 그리는 오버레이.
  *
- * 왜 AI 가 준 overlay.mp4 를 안 쓰는가:
- *   AI 는 OpenCV VideoWriter 의 'mp4v' fourcc 로 오버레이를 쓴다
- *   (`ai_server/services/tracking_video_io.py`). 그러면 MPEG-4 Part 2 가 되는데
- *   브라우저는 이 코덱을 디코딩하지 못한다. H.264(avc1) 만 재생된다.
- *   실제로 붙여보니 readyState 가 0 에서 안 올라갔다.
+ * 그리는 좌표는 `api/ai.js` 의 fetchTrajectory 가 만들어 준다. trajectory.csv 의
+ * raw_x/raw_y 를 쓴다. TrackSequence.history 의 cx/cy 를 쓰면 안 된다 - 그쪽은
+ * 카메라 움직임 보정 좌표라 실제 프레임에서 물체가 보이는 자리가 아니다.
+ * (자세한 근거는 fetchTrajectory 주석)
  *
- * 그래서 TrackSequence 를 받아 캔버스로 직접 그린다. 오히려 낫다.
- *   - 원본 해상도 그대로 본다 (overlay.mp4 는 처리 해상도 1280 으로 줄어 있다)
- *   - 프레임을 앞뒤로 돌려가며 볼 수 있다
- *   - 궤적을 같이 그릴 수 있다
- * overlay.mp4 는 다운로드 링크로 남겨둔다.
- *
- * 좌표: TrackPoint 의 cx/cy/w/h 는 processed_width/height 기준 0~1 정규화다.
- * 비율이라 원본 해상도에 그대로 곱하면 된다 (processed 는 원본의 등비 축소).
+ * AI 가 만든 overlay.mp4 를 쓰지 않는 이유는 코덱이다. OpenCV 의
+ * `VideoWriter_fourcc(*"mp4v")` 는 MPEG-4 Part 2 라 브라우저가 디코딩하지 못한다.
+ * 직접 그리면 원본 해상도로 보이고 프레임 단위로 돌려볼 수도 있다.
  */
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { createFitTransform, rectToDisplay } from '../lib/videoGeometry.js'
 
 const props = defineProps({
   videoEl: { type: Object, default: null },
-  /** AI 의 TrackSequence. { history: [{frame_index, cx, cy, w, h, conf}], ... } */
-  track: { type: Object, default: null },
+  /** [{frameIndex, cx, cy, w, h, conf, visible, source}] cx 등은 0~1 비율 */
+  points: { type: Array, default: () => [] },
   fps: { type: Number, default: 30 },
-  /** 지나온 궤적을 같이 그릴지 */
   showTrail: { type: Boolean, default: true },
 })
 
 const canvasEl = ref(null)
 
-let frameByIndex = new Map()
-let orderedPoints = []
+/**
+ * 추적 방식별 색. AI 오버레이와 같은 배색이다 (OpenCV 는 BGR 이라 순서를 뒤집었다).
+ * 어느 단계가 물체를 잡고 있는지 색으로 바로 보인다.
+ */
+const SOURCE_COLOR = {
+  manual_roi: '#ff3b30',   // 처음 지정한 ROI
+  klt: '#ffdc00',          // KLT 광류 추적
+  appearance: '#28a0dc',   // 외형 매칭으로 재포착
+  motion: '#50dc46',       // 움직임 기반 복구
+  prediction: '#ff8c00',   // 관측 없이 예측만
+  compensated: '#4da3ff',  // CSV 를 못 받아 보정 좌표로 대체한 경우
+}
+const DEFAULT_COLOR = '#ffdc00'
+
+let byFrame = new Map()
 let rafId = null
 let resizeObserver = null
 
-/** frame_index 로 바로 찾을 수 있게 미리 펼쳐둔다. 프레임마다 훑으면 느리다. */
-function indexTrack() {
-  frameByIndex = new Map()
-  orderedPoints = props.track?.history || []
-  orderedPoints.forEach((point) => frameByIndex.set(point.frame_index, point))
+/** frame_index 로 바로 찾도록 펼쳐둔다. 프레임마다 훑으면 느리다. */
+function indexPoints() {
+  byFrame = new Map()
+  props.points.forEach((point) => byFrame.set(point.frameIndex, point))
 }
 
 function currentFrame() {
@@ -77,35 +82,45 @@ function render() {
     boxHeight: height,
     fit: 'contain',
   })
-  if (!tf || !orderedPoints.length) return
+  if (!tf || !props.points.length) return
 
   const frame = currentFrame()
+  const point = byFrame.get(frame)
+  const color = SOURCE_COLOR[point?.source] || DEFAULT_COLOR
 
-  if (props.showTrail) drawTrail(ctx, tf, frame)
+  if (props.showTrail) drawTrail(ctx, tf, frame, color)
 
-  const point = frameByIndex.get(frame)
-  if (point) drawBox(ctx, tf, point)
-  else drawLost(ctx, tf)
+  if (!point) drawNotice(ctx, tf, 'LOST', '#fbbf24')
+  else if (!point.visible) drawBox(ctx, tf, point, color, true)
+  else drawBox(ctx, tf, point, color, false)
 }
 
-/** 지금까지 지나온 중심점을 이어 그린다. 궤적이 보이면 판정이 납득된다. */
-function drawTrail(ctx, tf, frame) {
-  ctx.strokeStyle = 'rgba(77,163,255,0.55)'
-  ctx.lineWidth = 1.5
+/**
+ * 지나온 경로. 보이는 프레임만 잇는다.
+ * AI 오버레이도 visible 일 때만 점을 더한다. 놓친 구간까지 이으면 있지도 않은
+ * 궤적을 그리게 된다.
+ */
+function drawTrail(ctx, tf, frame, color) {
+  ctx.strokeStyle = color
+  ctx.globalAlpha = 0.65
+  ctx.lineWidth = 2
+  ctx.lineJoin = 'round'
   ctx.beginPath()
 
   let started = false
-  for (const point of orderedPoints) {
-    if (point.frame_index > frame) break
+  for (const point of props.points) {
+    if (point.frameIndex > frame) break
+    if (!point.visible) continue
     const x = point.cx * tf.intrinsicWidth * tf.scale + tf.offsetX
     const y = point.cy * tf.intrinsicHeight * tf.scale + tf.offsetY
     if (started) ctx.lineTo(x, y)
     else { ctx.moveTo(x, y); started = true }
   }
   if (started) ctx.stroke()
+  ctx.globalAlpha = 1
 }
 
-function drawBox(ctx, tf, point) {
+function drawBox(ctx, tf, point, color, predicted) {
   const sourceRect = {
     x: (point.cx - point.w / 2) * tf.intrinsicWidth,
     y: (point.cy - point.h / 2) * tf.intrinsicHeight,
@@ -114,17 +129,20 @@ function drawBox(ctx, tf, point) {
   }
   const box = rectToDisplay(tf, sourceRect)
 
-  // 너무 작으면 보이지 않으니 최소 크기를 준다.
-  const drawWidth = Math.max(box.width, 10)
-  const drawHeight = Math.max(box.height, 10)
+  // 대상이 작으면 박스도 몇 픽셀밖에 안 되어 보이지 않는다. 최소 크기를 준다.
+  const drawWidth = Math.max(box.width, 12)
+  const drawHeight = Math.max(box.height, 12)
   const drawX = box.x - (drawWidth - box.width) / 2
   const drawY = box.y - (drawHeight - box.height) / 2
 
-  ctx.strokeStyle = '#4ade80'
+  ctx.strokeStyle = color
   ctx.lineWidth = 2
+  // 관측 없이 예측만 한 프레임은 점선으로 구분한다.
+  if (predicted) ctx.setLineDash([5, 4])
   ctx.strokeRect(drawX, drawY, drawWidth, drawHeight)
+  ctx.setLineDash([])
 
-  const text = `f${point.frame_index} · ${point.conf.toFixed(2)}`
+  const text = `f${point.frameIndex} ${point.source} ${point.conf.toFixed(2)}`
   ctx.font = '11px ui-monospace, Consolas, monospace'
   const padding = 5
   const labelWidth = ctx.measureText(text).width + padding * 2
@@ -132,17 +150,16 @@ function drawBox(ctx, tf, point) {
 
   ctx.fillStyle = 'rgba(13,17,23,0.85)'
   ctx.fillRect(drawX, labelY, labelWidth, 17)
-  ctx.fillStyle = '#4ade80'
+  ctx.fillStyle = color
   ctx.fillText(text, drawX + padding, labelY + 12)
 }
 
-/** 그 프레임에 관측이 없는 경우. 추적이 끊긴 구간이라는 걸 알려준다. */
-function drawLost(ctx, tf) {
-  const text = 'LOST'
+/** 그 프레임에 아무 기록이 없는 경우. 추적 구간 밖이거나 완전히 놓친 구간이다. */
+function drawNotice(ctx, tf, text, color) {
   ctx.font = '11px ui-monospace, Consolas, monospace'
   ctx.fillStyle = 'rgba(13,17,23,0.85)'
   ctx.fillRect(tf.offsetX + 8, tf.offsetY + 8, ctx.measureText(text).width + 12, 17)
-  ctx.fillStyle = '#fbbf24'
+  ctx.fillStyle = color
   ctx.fillText(text, tf.offsetX + 14, tf.offsetY + 20)
 }
 
@@ -181,7 +198,7 @@ function unbind(video) {
 }
 
 onMounted(() => {
-  indexTrack()
+  indexPoints()
   resizeObserver = new ResizeObserver(render)
   if (props.videoEl) {
     resizeObserver.observe(props.videoEl)
@@ -206,8 +223,8 @@ watch(() => props.videoEl, (video, previous) => {
   }
 })
 
-watch(() => props.track, () => {
-  indexTrack()
+watch(() => props.points, () => {
+  indexPoints()
   render()
 })
 </script>

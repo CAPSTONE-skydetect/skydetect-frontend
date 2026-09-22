@@ -22,7 +22,8 @@ import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory } from '../lib/historyStore.js'
 import {
-  uploadVideo, runManualTracking, toAnalysisDto, toProxiedUrl, DEFAULT_TUNING,
+  uploadVideo, runManualTracking, toAnalysisDto, toProxiedUrl,
+  fetchTrajectory, pointsFromHistory, DEFAULT_TUNING,
 } from '../api/ai.js'
 
 /** 클릭만 했을 때 만드는 박스 크기. CODEX 기본값. */
@@ -273,12 +274,21 @@ async function run() {
     const elapsedMs = Date.now() - startedAt
     const analysis = toAnalysisDto(response.prediction, { elapsedMs })
     const urls = mapUrls(response.download_urls)
+    const track = response.tracks?.[0] || null
+
+    // 화면에 겹쳐 그릴 좌표는 궤적 CSV 의 raw 값을 쓴다.
+    // track.history 는 카메라 움직임 보정 좌표라 실제 위치와 어긋난다.
+    const points = await fetchTrajectory(urls.trajectory, {
+      processedWidth: track?.processed_width,
+      processedHeight: track?.processed_height,
+    }).catch(() => null)
 
     result.value = {
       analysis,
       metrics: response.metrics || {},
       metadata: response.metadata || {},
-      track: response.tracks?.[0] || null,
+      track,
+      points: points || pointsFromHistory(track),
       features: response.features || null,
       urls,
     }
@@ -532,7 +542,7 @@ watch(objectUrl, () => { result.value = null })
           <OverlayPlayer
             v-else
             :src="objectUrl"
-            :track="result?.track || null"
+            :points="result?.points || null"
             :fps="fps"
             :frame-count="frameCount"
           />

@@ -83,6 +83,69 @@ export async function runManualTracking(p) {
   return send(`${AI_BASE}/api/tracks/manual`, { json: payload })
 }
 
+/**
+ * 궤적 CSV(trajectory.csv)를 받아 화면에 그릴 점 목록으로 바꾼다.
+ *
+ * 왜 TrackSequence.history 를 안 쓰는가:
+ *   history 의 cx/cy 는 stabilize=true 일 때 카메라 움직임 보정 좌표다
+ *   (`tracking_adapter._to_track_point`: compensated_x if stabilize else raw_x).
+ *   보정 좌표는 흔들림을 걷어낸 가상의 기준계라 실제 프레임에서 물체가 보이는
+ *   자리가 아니다. 실측해보니 raw 와 최대 x 28.8px / y 44.3px 어긋났고,
+ *   대상 bbox 가 17x12px 이라 박스 서너 개만큼 벗어난다.
+ *   AI 자신의 overlay.mp4 도 raw_x/raw_y 로 그린다
+ *   (`manual_roi_tracker` 의 오버레이 루프).
+ *   그래서 화면에 겹쳐 그릴 때는 CSV 의 raw 좌표를 쓴다.
+ *
+ * 좌표 단위는 처리 해상도 픽셀이므로 0~1 비율로 바꿔서 돌려준다.
+ * 처리 해상도는 원본의 등비 축소라 비율은 원본에서도 그대로 쓸 수 있다.
+ */
+export async function fetchTrajectory(url, { processedWidth, processedHeight }) {
+  if (!url || !processedWidth || !processedHeight) return null
+
+  const response = await fetch(url)
+  if (!response.ok) return null
+
+  const text = await response.text()
+  // CSV 줄바꿈이 CRLF 일 수 있어 끝의 공백/CR 을 떼어낸다.
+  const rows = text.trim().split('\n').map((line) => line.trimEnd())
+  const headerLine = rows[0]
+  const lines = rows.slice(1)
+  if (!headerLine) return null
+
+  const columns = headerLine.split(',')
+  const at = (row, name) => row[columns.indexOf(name)]
+
+  return lines.filter(Boolean).map((line) => {
+    const row = line.split(',')
+    return {
+      frameIndex: Number(at(row, 'frame_index')),
+      cx: Number(at(row, 'raw_x')) / processedWidth,
+      cy: Number(at(row, 'raw_y')) / processedHeight,
+      w: Number(at(row, 'bbox_width')) / processedWidth,
+      h: Number(at(row, 'bbox_height')) / processedHeight,
+      conf: Number(at(row, 'confidence')),
+      // 화면 밖으로 나갔거나 추적을 놓친 프레임. AI 오버레이도 이때는
+      // 궤적에 점을 더하지 않는다.
+      visible: at(row, 'visible') === 'True',
+      source: at(row, 'tracking_source'),
+    }
+  }).filter((point) => Number.isFinite(point.frameIndex) && Number.isFinite(point.cx))
+}
+
+/** CSV 를 못 받았을 때의 대비책. 보정 좌표라 카메라가 움직이면 어긋난다. */
+export function pointsFromHistory(track) {
+  return (track?.history || []).map((point) => ({
+    frameIndex: point.frame_index,
+    cx: point.cx,
+    cy: point.cy,
+    w: point.w,
+    h: point.h,
+    conf: point.conf,
+    visible: true,
+    source: 'compensated',
+  }))
+}
+
 /** AI 의 PredictionResult 를 화면이 쓰는 모양으로 맞춘다. */
 export function toAnalysisDto(prediction, { analysisId, clipId, elapsedMs } = {}) {
   if (!prediction) return null
@@ -169,14 +232,24 @@ async function run(analysisId, clipId, payload, videoUrl) {
     const dto = toAnalysisDto(tracked.prediction, {
       analysisId, clipId, elapsedMs: Date.now() - startedAt,
     })
+    const track = tracked.tracks?.[0] || null
+    // overlay.mp4 는 OpenCV 'mp4v' 라 브라우저가 못 읽는다. 화면은 궤적을 받아
+    // 캔버스로 직접 그린다. url 은 다운로드용으로만 둔다.
+    const points = await fetchTrajectory(
+      toProxiedUrl(tracked.download_urls?.trajectory),
+      {
+        processedWidth: track?.processed_width,
+        processedHeight: track?.processed_height,
+      },
+    ).catch(() => null)
+
     jobs.set(analysisId, {
       status: 'DONE',
       result: {
         ...dto,
-        // overlay.mp4 는 OpenCV 'mp4v' 라 브라우저가 못 읽는다. 화면은 이 track 을
-        // 받아 캔버스로 직접 그린다 (TrackOverlay.vue). url 은 다운로드용으로만 둔다.
         overlayUrl: toProxiedUrl(tracked.download_urls?.overlay),
-        track: tracked.tracks?.[0] || null,
+        track,
+        points: points || pointsFromHistory(track),
         fps: tracked.metadata?.fps || null,
       },
       error: null,

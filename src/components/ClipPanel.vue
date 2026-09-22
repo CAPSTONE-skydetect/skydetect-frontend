@@ -210,7 +210,7 @@ function redraw() {
 }
 
 /** A 파트 추적 결과. AI 경로로 분석했을 때만 온다. */
-const track = computed(() => clip.value?.analysis?.track || null)
+const trackPoints = computed(() => clip.value?.analysis?.points || null)
 
 // 표시용 ------------------------------------------------------------------
 
@@ -326,9 +326,9 @@ const timeLabel = computed(() => {
             @ended="playing = false"
           />
           <TrackOverlay
-            v-if="showOverlay && track"
+            v-if="showOverlay && trackPoints"
             :video-el="videoEl"
-            :track="track"
+            :points="trackPoints"
             :fps="meta?.fps || 30"
           />
           <BoxOverlay
@@ -397,7 +397,7 @@ const timeLabel = computed(() => {
             </div>
           </template>
 
-          <template v-else-if="state === 'DONE' && track">
+          <template v-else-if="state === 'DONE' && trackPoints">
             <button @click="showOverlay = !showOverlay">
               {{ showOverlay ? '지정 박스 보기' : '추적 오버레이 보기' }}
             </button>

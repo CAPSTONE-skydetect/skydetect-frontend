@@ -20,8 +20,8 @@ import { toFrameIndex } from '../lib/videoGeometry.js'
 const props = defineProps({
   /** 원본 영상 주소 (업로드한 파일의 objectURL) */
   src: { type: String, default: null },
-  /** AI 의 TrackSequence */
-  track: { type: Object, default: null },
+  /** api/ai.js fetchTrajectory 가 만든 점 목록 (raw 좌표 기준) */
+  points: { type: Array, default: null },
   fps: { type: Number, default: 30 },
   frameCount: { type: Number, default: 0 },
 })
@@ -35,9 +35,9 @@ const lastFrame = computed(() => Math.max(0, (props.frameCount || 1) - 1))
 
 /** 추적이 커버하는 구간. 그 밖에서는 박스가 안 뜨는 게 정상이다. */
 const trackRange = computed(() => {
-  const history = props.track?.history
-  if (!history?.length) return null
-  return { from: history[0].frame_index, to: history[history.length - 1].frame_index }
+  const points = props.points
+  if (!points?.length) return null
+  return { from: points[0].frameIndex, to: points[points.length - 1].frameIndex }
 })
 
 const inTrackRange = computed(() => {
@@ -78,7 +78,7 @@ function jumpToTrackStart() {
 }
 
 // 결과가 바뀌면 추적 시작 지점에서 다시 본다.
-watch(() => props.track, () => {
+watch(() => props.points, () => {
   playing.value = false
   jumpToTrackStart()
 })
@@ -108,31 +108,31 @@ const timeLabel = computed(() => {
         @ended="playing = false"
       />
       <TrackOverlay
-        v-if="track"
+        v-if="points"
         :video-el="videoEl"
-        :track="track"
+        :points="points"
         :fps="fps"
         :show-trail="showTrail"
       />
 
-      <div v-if="!track" class="player__empty">
+      <div v-if="!points" class="player__empty">
         <p class="faint">ROI 추적 전</p>
       </div>
     </div>
 
     <div class="player__controls">
-      <button class="player__icon" :disabled="!track" @click="togglePlay">
+      <button class="player__icon" :disabled="!points" @click="togglePlay">
         {{ playing ? '❚❚' : '▶' }}
       </button>
-      <button class="player__icon" :disabled="!track" @click="seekToFrame(frameIndex - 1)">◀</button>
+      <button class="player__icon" :disabled="!points" @click="seekToFrame(frameIndex - 1)">◀</button>
       <input
         class="player__range"
         type="range"
         :min="0" :max="lastFrame" :value="frameIndex"
-        :disabled="!track"
+        :disabled="!points"
         @input="seekToFrame(Number($event.target.value))"
       />
-      <button class="player__icon" :disabled="!track" @click="seekToFrame(frameIndex + 1)">▶</button>
+      <button class="player__icon" :disabled="!points" @click="seekToFrame(frameIndex + 1)">▶</button>
 
       <span class="mono player__frame">
         frame <b>{{ frameIndex }}</b> / {{ lastFrame }}
@@ -142,7 +142,7 @@ const timeLabel = computed(() => {
 
     <div class="player__legend">
       <label class="player__toggle">
-        <input v-model="showTrail" type="checkbox" :disabled="!track" />
+        <input v-model="showTrail" type="checkbox" :disabled="!points" />
         <span>궤적</span>
       </label>
 
