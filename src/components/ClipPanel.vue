@@ -15,7 +15,10 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import BoxOverlay from './BoxOverlay.vue'
 import AnalysisResult from './AnalysisResult.vue'
+import TrackOverlay from './TrackOverlay.vue'
 import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
+import { captureThumbnail } from '../lib/videoThumbnail.js'
+import { addHistory } from '../lib/historyStore.js'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -32,6 +35,13 @@ const requestError = ref(null)
  * 메타데이터 로드와 창 크기 변경 때 이 값을 올려 computed 를 다시 돌린다.
  */
 const geometryVersion = ref(0)
+/**
+ * 결과가 나온 뒤 A 파트 추적 결과를 영상 위에 겹쳐 볼지.
+ *
+ * AI 가 만든 overlay.mp4 를 쓰지 않는다. OpenCV 'mp4v'(MPEG-4 Part 2) 라
+ * 브라우저가 디코딩하지 못한다. 대신 TrackSequence 를 받아 캔버스로 직접 그린다.
+ */
+const showOverlay = ref(false)
 
 const clip = computed(() => props.session.selectedClip.value)
 const state = computed(() => props.session.screenState.value)
@@ -43,7 +53,41 @@ watch(() => clip.value?.clipId, () => {
   frameIndex.value = 0
   playing.value = false
   requestError.value = null
+  showOverlay.value = false
 })
+
+/**
+ * 분석이 끝나면 기록에 남긴다.
+ *
+ * 썸네일은 지금 찍어야 한다. 사용자가 프레임을 옮기거나 다른 클립을 고르면
+ * 판정 당시 화면이 사라진다.
+ */
+const recorded = new Set()
+watch(() => clip.value?.analysis, (analysis) => {
+  if (!analysis || analysis.status !== 'DONE') return
+  if (!analysis.analysisId || recorded.has(analysis.analysisId)) return
+  recorded.add(analysis.analysisId)
+
+  addHistory({
+    source: 'live',
+    title: clip.value.clipId,
+    label: analysis.label,
+    confidence: analysis.confidence,
+    rejectReason: analysis.rejectReason,
+    bbox: lastRequestedBbox,
+    initFrameIndex: analysis.request?.initFrameIndex ?? frameIndex.value,
+    quality: analysis.quality || null,
+    topFeatures: analysis.topFeatures || null,
+    metrics: null,
+    tuning: null,
+    processingTimeMs: analysis.processingTimeMs,
+    thumbnail: captureThumbnail(videoEl.value, { box: sourceBox.value }),
+    overlayUrl: analysis.overlayUrl || null,
+  })
+}, { deep: true })
+
+/** 기록에 남길 좌표. 분석 요청 시점의 값을 들고 있는다. */
+let lastRequestedBbox = null
 
 // 남은 시간 --------------------------------------------------------------
 
@@ -147,6 +191,8 @@ async function requestAnalysis() {
     ],
   }
 
+  lastRequestedBbox = payload.targetBbox
+
   try {
     // videoUrl 은 AI 직결 경로에서만 쓴다 (클립 영상을 AI 에 업로드해야 한다).
     await props.session.requestAnalysis(clip.value.clipId, payload, {
@@ -160,7 +206,11 @@ async function requestAnalysis() {
 function redraw() {
   props.session.resetAnalysis(clip.value.clipId)
   sourceBox.value = null
+  showOverlay.value = false
 }
+
+/** A 파트 추적 결과. AI 경로로 분석했을 때만 온다. */
+const track = computed(() => clip.value?.analysis?.track || null)
 
 // 표시용 ------------------------------------------------------------------
 
@@ -275,7 +325,14 @@ const timeLabel = computed(() => {
             @timeupdate="onTimeUpdate"
             @ended="playing = false"
           />
+          <TrackOverlay
+            v-if="showOverlay && track"
+            :video-el="videoEl"
+            :track="track"
+            :fps="meta?.fps || 30"
+          />
           <BoxOverlay
+            v-if="!showOverlay"
             :video-el="videoEl"
             :source-box="sourceBox"
             :disabled="state !== 'CLIP_READY'"
@@ -338,6 +395,13 @@ const timeLabel = computed(() => {
               <span>분석 중</span>
               <span class="faint mono">{{ clip.analysis.status }}</span>
             </div>
+          </template>
+
+          <template v-else-if="state === 'DONE' && track">
+            <button @click="showOverlay = !showOverlay">
+              {{ showOverlay ? '지정 박스 보기' : '추적 오버레이 보기' }}
+            </button>
+            <span class="faint">초록 박스가 프레임별 검출, 파란 선이 궤적</span>
           </template>
 
           <template v-else-if="state === 'ANALYSIS_FAILED'">

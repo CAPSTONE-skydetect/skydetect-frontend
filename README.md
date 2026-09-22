@@ -79,12 +79,64 @@ AI 는 작업 큐가 없어서 한 번의 요청으로 끝까지 처리한다. �
 
 ---
 
+## 화면 세 개
+
+헤더 토글로 오간다. 라우터 라이브러리 없이 해시로만 구분한다
+(`#/live`, `#/upload`, `#/history`). 새로고침과 뒤로가기가 그대로 동작한다.
+
+| 화면 | 하는 일 |
+| --- | --- |
+| **실시간** | 왼쪽 라이브 HLS + 검출 → 오른쪽 클립에 박스 지정 → 분석 |
+| **업로드 분석** | 왼쪽에 올린 영상 + ROI 지정 → 오른쪽에 A 파트 추적 오버레이와 판정 |
+| **검출 기록** | 지금까지의 판정을 썸네일/설정값과 함께 되돌아본다 |
+
+### 업로드 분석
+
+AI(8000)를 직접 부른다. 백엔드를 거치지 않는 검증용 화면이다.
+
+1. 영상을 올리면 `POST /ai/api/videos/upload` 로 AI 안에 저장된다
+   (AI 는 서버 경로로만 작업한다). 왼쪽 재생은 올린 파일을 그대로 쓴다
+2. 프레임을 고르고 드래그해서 ROI 를 그린다. 중심 X/Y 와 bbox W/H 는 숫자로도
+   조정할 수 있다
+3. 오른쪽에서 추적 파라미터를 맞추고 `ROI 추적`
+4. 결과로 추적 오버레이 영상, 판정, 트랙 지표, 산출물 다운로드가 뜬다
+
+추적 파라미터의 범위와 기본값은 AI 의 `tracking_schemas.py` 에서 가져왔고,
+설명 문구는 CODEX 브랜치의 수동 ROI UI 에 있던 것을 그대로 옮겼다.
+
+| 값 | 범위 | 기본 |
+| --- | --- | --- |
+| 유지 conf `klt_accept_conf` | 0.10 ~ 0.95 | 0.40 |
+| 재탐색 conf `recovery_conf` | 0.10 ~ 0.95 | 0.58 |
+| 학습 conf `update_conf` | 0.10 ~ 0.99 | 0.76 |
+| 검색 반경 `search_radius_multiplier` | 1.0 ~ 8.0 | 2.5 |
+| 온라인 외형 학습 `online_update_enabled` | | OFF |
+| 카메라 움직임 보정 `stabilize` | | ON |
+| 처리 해상도 `resize_width` | 320 ~ 7680 | 1280 |
+| 추적 시간 `max_seconds` | 1 이상 (비우면 전체) | 10 |
+
+학습 conf 는 온라인 외형 학습이 켜져야 의미가 있어서 OFF 일 때 흐리게 잠근다.
+
+### 검출 기록
+
+백엔드에 이력 API 가 없어서 **브라우저(localStorage)에 남긴다**. 그래서
+
+- 이 브라우저에만 남는다. 다른 PC 에서는 안 보인다
+- 방문 기록을 지우면 같이 사라진다
+- 오버레이 영상은 AI 의 임시 파일이라 AI 를 다시 띄우면 링크가 끊긴다
+  (썸네일은 남는다)
+
+화면은 `lib/historyStore.js` 가 주는 모양만 보므로, 백엔드가 `GET /api/analyses` 를
+열면 그 파일만 바꾸면 된다.
+
+---
+
 ## 구조
 
 ```
 src/
 ├─ main.js                    엔트리. 라우터 없음
-├─ App.vue                    로그인 여부에 따라 두 화면 중 하나
+├─ App.vue                    로그인 분기 + 해시로 화면 선택
 │
 ├─ api/                       서버와 말하는 유일한 계층
 │  ├─ http.js                 fetch 래퍼. CSRF 헤더 + 401 전역 처리
@@ -103,14 +155,25 @@ src/
 │
 ├─ lib/videoGeometry.js       화면 좌표 ↔ 원본 픽셀 좌표 변환 (순수 함수)
 │
+├─ lib/historyStore.js       검출 기록 (localStorage)
+├─ lib/videoThumbnail.js     기록 썸네일 캡처
+│
 └─ components/
    ├─ LoginView.vue
-   ├─ ConsoleView.vue         좌우 2분할 레이아웃 + 연결 상태
-   ├─ LivePanel.vue           왼쪽: 라이브 + 검출 버튼
-   ├─ ClipPanel.vue           오른쪽: 다섯 상태의 분기
-   ├─ BoxOverlay.vue          canvas 박스 드로잉 + 좌표 검증 재투영
-   ├─ AnalysisResult.vue      결과 (판단불가 포함)
-   └─ ClipQueue.vue           동시 진행 중인 클립 목록
+   ├─ AppShell.vue           헤더: 화면 토글 + AI 연결 상태 + 계정
+   │
+   ├─ ConsoleView.vue        [실시간] 좌우 2분할
+   │  ├─ LivePanel.vue          왼쪽: 라이브 + 검출 버튼
+   │  ├─ ClipPanel.vue          오른쪽: 다섯 상태의 분기
+   │  └─ ClipQueue.vue          동시 진행 중인 클립 목록
+   │
+   ├─ UploadView.vue         [업로드 분석] 원본 + 추적 오버레이
+   │  └─ TrackingTuning.vue     A 파트 파라미터 조절판
+   │
+   ├─ HistoryView.vue        [검출 기록] 목록 + 상세
+   │
+   ├─ BoxOverlay.vue         canvas 박스 드로잉 + 좌표 검증 재투영
+   └─ AnalysisResult.vue     판정 카드 (판단불가 포함)
 ```
 
 ---

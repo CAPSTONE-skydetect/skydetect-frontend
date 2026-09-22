@@ -35,6 +35,3 @@ export const AI_BASE = '/ai'
 
 /** 상태 폴링 간격. SSE/WebSocket 은 백엔드 미구현이라 폴링이 전제다. */
 export const POLL_INTERVAL_MS = 1_000
-
-/** 헤더 표시용 요약 */
-export const USING_MOCK = CLIP_SOURCE === 'mock' || ANALYSIS_SOURCE === 'mock'

@@ -1,0 +1,372 @@
+<script setup>
+/**
+ * 검출 기록.
+ *
+ * 저장소는 브라우저다 (lib/historyStore.js). 백엔드에 이력 API 가 없어서다.
+ * 한계는 historyStore 주석에 적어뒀고, 화면 아래에도 한 줄로 띄운다.
+ * 없는 걸 있는 것처럼 보이면 나중에 "기록이 왜 사라졌지"가 된다.
+ */
+import { ref, computed, onMounted } from 'vue'
+import { listHistory, removeHistory, clearHistory } from '../lib/historyStore.js'
+
+const entries = ref([])
+const selectedId = ref(null)
+const filter = ref('all')  // all | bird | drone | uncertain
+
+const LABEL = {
+  bird: { text: '새', tone: 'ok' },
+  drone: { text: '드론', tone: 'error' },
+  uncertain: { text: '판단불가', tone: 'warn' },
+}
+
+const REJECT_REASON = {
+  short_track: '추적된 구간이 너무 짧다',
+  feature_error: '특징 계산에 실패했다',
+  high_noise: '관측 잡음이 커서 궤적을 믿기 어렵다',
+  low_confidence: '분류 신뢰도가 기준에 못 미쳤다',
+}
+
+const STABILITY = { good: '양호', fair: '보통', poor: '불량' }
+const SOURCE = { live: '실시간', upload: '업로드' }
+
+onMounted(reload)
+
+function reload() {
+  entries.value = listHistory()
+  if (!entries.value.some((entry) => entry.id === selectedId.value)) {
+    selectedId.value = entries.value[0]?.id || null
+  }
+}
+
+const visible = computed(() => {
+  if (filter.value === 'all') return entries.value
+  return entries.value.filter((entry) => entry.label === filter.value)
+})
+
+const selected = computed(
+  () => entries.value.find((entry) => entry.id === selectedId.value) || null,
+)
+
+const counts = computed(() => {
+  const base = { all: entries.value.length, bird: 0, drone: 0, uncertain: 0 }
+  entries.value.forEach((entry) => {
+    if (base[entry.label] !== undefined) base[entry.label] += 1
+  })
+  return base
+})
+
+function onRemove(id) {
+  removeHistory(id)
+  reload()
+}
+
+function onClearAll() {
+  if (!entries.value.length) return
+  clearHistory()
+  reload()
+}
+
+function labelOf(entry) {
+  return LABEL[entry.label] || { text: entry.label || '-', tone: '' }
+}
+
+function timeOf(value) {
+  const date = new Date(value)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+    + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+function confidenceOf(entry) {
+  if (entry.label === 'uncertain') return '점수 없음'
+  return Math.round((entry.confidence || 0) * 100) + '%'
+}
+
+const tuningRows = computed(() => {
+  const t = selected.value?.tuning
+  if (!t) return []
+  return [
+    ['유지 conf', t.kltAcceptConf],
+    ['재탐색 conf', t.recoveryConf],
+    ['학습 conf', t.updateConf],
+    ['검색 반경', t.searchRadius ? t.searchRadius + 'x' : null],
+    ['온라인 학습', t.onlineUpdate === undefined ? null : (t.onlineUpdate ? 'ON' : 'OFF')],
+    ['움직임 보정', t.stabilize === undefined ? null : (t.stabilize ? 'ON' : 'OFF')],
+    ['처리 해상도', t.resizeWidth ? t.resizeWidth + 'px' : null],
+    ['추적 시간', t.maxSeconds ? t.maxSeconds + '초' : '전체'],
+  ].filter(([, value]) => value !== null && value !== undefined)
+})
+</script>
+
+<template>
+  <main class="history">
+    <!-- 목록 -->
+    <section class="panel">
+      <div class="panel__head">
+        <span class="panel__title">검출 기록</span>
+        <span class="faint">{{ counts.all }}건</span>
+        <div style="flex: 1" />
+        <button class="history__clear" :disabled="!entries.length" @click="onClearAll">전체 삭제</button>
+      </div>
+
+      <div class="history__filters">
+        <button
+          v-for="key in ['all', 'bird', 'drone', 'uncertain']"
+          :key="key"
+          class="history__filter"
+          :class="{ 'history__filter--on': filter === key }"
+          @click="filter = key"
+        >
+          {{ key === 'all' ? '전체' : LABEL[key].text }}
+          <span class="faint">{{ counts[key] }}</span>
+        </button>
+      </div>
+
+      <div class="panel__body history__list">
+        <p v-if="!visible.length" class="faint history__empty">
+          {{ entries.length ? '해당 결과가 없습니다' : '아직 기록이 없습니다' }}
+        </p>
+
+        <button
+          v-for="entry in visible"
+          :key="entry.id"
+          class="card"
+          :class="{ 'card--active': entry.id === selectedId }"
+          @click="selectedId = entry.id"
+        >
+          <div class="card__thumb">
+            <img v-if="entry.thumbnail" :src="entry.thumbnail" alt="" />
+            <span v-else class="faint">–</span>
+          </div>
+
+          <div class="card__body">
+            <div class="card__top">
+              <span class="badge" :class="'badge--' + labelOf(entry).tone">
+                <span class="dot" />{{ labelOf(entry).text }}
+              </span>
+              <span class="mono card__conf">{{ confidenceOf(entry) }}</span>
+              <div style="flex: 1" />
+              <span class="badge card__source">{{ SOURCE[entry.source] || entry.source }}</span>
+            </div>
+            <div class="card__title">{{ entry.title }}</div>
+            <div class="faint mono card__time">{{ timeOf(entry.createdAt) }}</div>
+          </div>
+
+          <span class="card__remove" title="삭제" @click.stop="onRemove(entry.id)">✕</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 상세 -->
+    <section class="panel">
+      <div class="panel__head">
+        <span class="panel__title">상세</span>
+        <span v-if="selected" class="badge" :class="'badge--' + labelOf(selected).tone">
+          <span class="dot" />{{ labelOf(selected).text }}
+        </span>
+      </div>
+
+      <div class="panel__body history__detail">
+        <p v-if="!selected" class="faint history__empty">왼쪽에서 기록을 선택하세요</p>
+
+        <template v-else>
+          <div class="detail__media">
+            <img v-if="selected.thumbnail" class="detail__video" :src="selected.thumbnail" alt="" />
+            <p v-else class="faint detail__nomedia">남은 화면이 없습니다</p>
+          </div>
+          <p class="faint detail__note">
+            판정 당시 화면과 지정한 박스다.
+            <template v-if="selected.overlayUrl">
+              추적 오버레이는
+              <a :href="selected.overlayUrl" download>내려받을 수 있다</a>.
+              OpenCV mp4v 코덱이라 브라우저에서는 재생되지 않고, AI 서버를 다시
+              띄우면 링크가 끊긴다.
+            </template>
+          </p>
+
+          <p v-if="selected.rejectReason" class="detail__reason">
+            <b>사유</b> · {{ REJECT_REASON[selected.rejectReason] || selected.rejectReason }}
+            <span class="faint mono">({{ selected.rejectReason }})</span>
+          </p>
+
+          <dl class="detail__grid">
+            <dt class="faint">일시</dt>
+            <dd class="mono">{{ timeOf(selected.createdAt) }}</dd>
+            <dt class="faint">출처</dt>
+            <dd>{{ SOURCE[selected.source] || selected.source }} · {{ selected.title }}</dd>
+            <dt class="faint">시작 프레임</dt>
+            <dd class="mono">{{ selected.initFrameIndex }}</dd>
+            <dt class="faint">bbox (원본 px)</dt>
+            <dd class="mono">[{{ (selected.bbox || []).join(', ') }}]</dd>
+            <dt class="faint">처리 시간</dt>
+            <dd class="mono">
+              {{ selected.processingTimeMs ? (selected.processingTimeMs / 1000).toFixed(1) + '초' : '-' }}
+            </dd>
+          </dl>
+
+          <template v-if="selected.quality">
+            <div class="detail__section faint">트랙 품질</div>
+            <dl class="detail__grid">
+              <dt class="faint">추적 프레임</dt>
+              <dd class="mono">{{ selected.quality.numPoints }}</dd>
+              <dt class="faint">평균 신뢰도</dt>
+              <dd class="mono">{{ Math.round((selected.quality.meanConf || 0) * 100) }}%</dd>
+              <dt class="faint">안정성</dt>
+              <dd>{{ STABILITY[selected.quality.trackStability] || selected.quality.trackStability }}</dd>
+              <dt class="faint">특징 상태</dt>
+              <dd>{{ selected.quality.featureStatus }}</dd>
+            </dl>
+          </template>
+
+          <template v-if="tuningRows.length">
+            <div class="detail__section faint">추적 설정</div>
+            <dl class="detail__grid">
+              <template v-for="[name, value] in tuningRows" :key="name">
+                <dt class="faint">{{ name }}</dt>
+                <dd class="mono">{{ value }}</dd>
+              </template>
+            </dl>
+          </template>
+
+          <template v-if="selected.topFeatures">
+            <div class="detail__section faint">주요 특징</div>
+            <div class="detail__features">
+              <span
+                v-for="(weight, name) in selected.topFeatures"
+                :key="name"
+                class="badge mono detail__feature"
+              >{{ name }} {{ Number(weight).toFixed(2) }}</span>
+            </div>
+          </template>
+        </template>
+      </div>
+
+      <p class="history__disclaimer faint">
+        기록은 이 브라우저에만 저장된다. 백엔드에 이력 API 가 생기면 서버 기록으로 바꾼다.
+      </p>
+    </section>
+  </main>
+</template>
+
+<style scoped>
+.history {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(340px, 2fr) minmax(0, 3fr);
+  gap: 12px;
+}
+.history__clear { padding: 3px 10px; font-size: 11px; }
+
+.history__filters {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.history__filter {
+  padding: 4px 10px;
+  font-size: 11px;
+  display: flex;
+  gap: 6px;
+  background: transparent;
+  border-color: var(--border);
+}
+.history__filter--on { border-color: var(--accent); background: var(--accent-dim); }
+
+.history__list { overflow-y: auto; gap: 8px; padding: 10px; }
+.history__empty { margin: auto; font-size: 12px; }
+
+.card {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 8px;
+  text-align: left;
+  width: 100%;
+  flex: none;
+  position: relative;
+}
+.card--active { border-color: var(--accent); background: var(--accent-dim); }
+.card__thumb {
+  width: 92px;
+  height: 56px;
+  flex: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #05080c;
+  display: grid;
+  place-items: center;
+}
+.card__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.card__top { display: flex; align-items: center; gap: 7px; }
+.card__conf { font-size: 12px; }
+.card__source { font-size: 10px; padding: 2px 7px; }
+.card__title {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card__time { font-size: 11px; }
+.card__remove {
+  position: absolute;
+  top: 6px; right: 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.card__remove:hover { color: var(--danger); }
+
+.history__detail { overflow-y: auto; padding: 14px; gap: 12px; }
+.detail__media {
+  height: 320px;
+  background: #05080c;
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex: none;
+}
+.detail__video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.detail__nomedia { display: grid; place-items: center; height: 100%; margin: 0; }
+.detail__note { font-size: 11px; margin: 0; line-height: 1.5; }
+.detail__note a { color: var(--accent); }
+
+.detail__reason {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: var(--radius);
+  background: #2a2417;
+  color: var(--uncertain);
+  font-size: 13px;
+}
+
+.detail__section { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.detail__grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 12px;
+}
+.detail__grid dt { font-size: 11px; }
+.detail__grid dd { margin: 0; }
+
+.detail__features { display: flex; gap: 6px; flex-wrap: wrap; }
+.detail__feature { font-size: 11px; }
+
+.history__disclaimer {
+  flex: none;
+  margin: 0;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
+@media (max-width: 1100px) {
+  .history { grid-template-columns: minmax(0, 1fr); grid-auto-rows: min-content; }
+  .history > * { min-height: 420px; }
+}
+</style>

@@ -1,20 +1,33 @@
 /**
- * AI 서버(FastAPI, 기본 8000) 직결 클라이언트.
+ * AI 서버(FastAPI, 기본 8000) 클라이언트.
  *
- * 정식 경로는 프론트 → 백엔드 → AI 다. 이 파일은 백엔드에 분석 API 가 생기기
- * 전까지 쓰는 개발용 우회로다. 로컬에 AI 를 띄워두면 mock 대신 진짜 결과를
- * 볼 수 있다. VITE_ANALYSIS_SOURCE=ai 일 때만 쓰인다.
+ * 두 가지로 쓰인다.
+ *   1. 실시간 화면 - 클립을 올려 분석시키는 우회로 (VITE_ANALYSIS_SOURCE=ai)
+ *      정식 경로는 프론트 → 백엔드 → AI 다. 백엔드에 분석 API 가 생기면 지운다.
+ *   2. 업로드 분석 화면 - 사용자가 올린 영상을 그대로 A 파트 파이프라인에 태운다
  *
- * AI 는 비동기 작업 큐가 없고 한 번의 요청으로 끝까지 처리한다. 반면 화면은
- * 202 + 폴링을 전제로 짜여 있어서, 여기서 작업 테이블을 들고 그 모양을 맞춰준다.
+ * AI 는 작업 큐가 없고 한 번의 요청으로 끝까지 처리한다. 13초 1080p 클립이
+ * 2분 가까이 걸리므로 타임아웃을 걸지 않는다.
  */
 import { AI_BASE } from './config.js'
 
-/** analysisId -> { status, result, error } */
-const jobs = new Map()
-let sequence = 0
+/** TrackingTuning 의 pydantic 기본값과 같다. */
+export const DEFAULT_TUNING = {
+  kltAcceptConf: 0.40,
+  recoveryConf: 0.58,
+  updateConf: 0.76,
+  searchRadius: 2.5,
+  onlineUpdate: false,
+}
 
-/** GET /health — AI 가 떠 있는지 확인 */
+/** AI 가 주는 다운로드 주소는 자기 기준(/api/files?...)이라 프록시 접두어를 붙인다. */
+export function toProxiedUrl(url) {
+  if (!url) return null
+  if (url.startsWith('http')) return url
+  return AI_BASE + url
+}
+
+/** GET /health */
 export async function fetchHealth() {
   const response = await fetch(`${AI_BASE}/health`, { signal: AbortSignal.timeout(3000) })
   if (!response.ok) throw new Error(`AI 서버 응답 ${response.status}`)
@@ -22,112 +35,57 @@ export async function fetchHealth() {
 }
 
 /**
- * 분석 시작. 즉시 analysisId 를 돌려주고 뒤에서 실제 작업을 돌린다.
- *
- * @param {string} clipId
- * @param {object} payload  { initFrameIndex, targetBbox }
- * @param {object} context  { videoUrl } 클립 영상 주소. AI 에 업로드해야 한다
+ * 영상 업로드. AI 는 서버 안의 파일 경로로만 작업하므로 추적 전에 반드시 거친다.
+ * @returns {Promise<{source_video_id:string, video_path:string, metadata:object}>}
  */
-export async function createAnalysis(clipId, payload, context = {}) {
-  if (!context.videoUrl) {
-    throw Object.assign(new Error('클립 영상 주소가 없어 AI 로 보낼 수 없습니다.'), {
-      status: 400, code: 'NO_VIDEO_URL',
-    })
-  }
-
-  sequence += 1
-  const analysisId = `ai_${Date.now().toString(36)}${sequence.toString(36)}`
-  jobs.set(analysisId, { status: 'RUNNING', result: null, error: null })
-
-  // 기다리지 않는다. 화면은 폴링으로 진행 상황을 본다.
-  run(analysisId, clipId, payload, context.videoUrl)
-
-  return { analysisId, status: 'PENDING' }
-}
-
-/** 상태 조회. 화면의 폴러가 이걸 1초마다 부른다. */
-export async function fetchAnalysis(analysisId) {
-  const job = jobs.get(analysisId)
-  if (!job) {
-    throw Object.assign(new Error('분석 작업을 찾을 수 없습니다.'), { status: 404 })
-  }
-  if (job.status === 'FAILED') {
-    return { analysisId, status: 'FAILED', message: job.error?.message }
-  }
-  if (job.status === 'DONE') return job.result
-  return { analysisId, status: job.status }
-}
-
-export async function fetchAnalysisHistory() {
-  return [...jobs.entries()]
-    .filter(([, job]) => job.status === 'DONE')
-    .map(([, job]) => job.result)
-}
-
-
-async function run(analysisId, clipId, payload, videoUrl) {
-  const startedAt = Date.now()
-  try {
-    // 1) 클립 영상을 받아서 AI 에 업로드한다.
-    //    AI 는 서버 안의 파일 경로로만 작업하므로 업로드가 먼저다.
-    const videoResponse = await fetch(videoUrl)
-    if (!videoResponse.ok) throw new Error(`클립 영상을 읽지 못했습니다 (${videoResponse.status})`)
-    const blob = await videoResponse.blob()
-
-    const form = new FormData()
-    form.append('file', blob, `${clipId}.mp4`)
-
-    const uploaded = await postJson(`${AI_BASE}/api/videos/upload`, { body: form })
-
-    // 2) 수동 ROI 추적 + 특징추출 + 분류를 한 번에 돌린다.
-    const tracked = await postJson(`${AI_BASE}/api/tracks/manual`, {
-      json: {
-        source_video_id: uploaded.source_video_id,
-        video_path: uploaded.video_path,
-        init_frame_index: payload.initFrameIndex,
-        // AI 도 원본 픽셀 좌표를 기대한다.
-        // (manual_roi_tracker._scale_initial_bbox 가 내부에서 처리 해상도로 환산)
-        target_bbox: payload.targetBbox,
-      },
-    })
-
-    jobs.set(analysisId, {
-      status: 'DONE',
-      result: toAnalysisDto(analysisId, clipId, tracked.prediction, Date.now() - startedAt),
-      error: null,
-    })
-  } catch (error) {
-    jobs.set(analysisId, { status: 'FAILED', result: null, error })
-  }
-}
-
-async function postJson(url, { json, body }) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: json ? { 'Content-Type': 'application/json' } : undefined,
-    body: json ? JSON.stringify(json) : body,
-  })
-  const text = await response.text()
-  const parsed = text ? safeParse(text) : null
-  if (!response.ok) {
-    const detail = parsed?.detail || parsed?.message || text || response.statusText
-    throw new Error(`AI 오류 ${response.status}: ${detail}`)
-  }
-  return parsed
-}
-
-function safeParse(text) {
-  try { return JSON.parse(text) } catch { return text }
+export async function uploadVideo(file, filename) {
+  const form = new FormData()
+  form.append('file', file, filename || file.name || 'clip.mp4')
+  return send(`${AI_BASE}/api/videos/upload`, { body: form })
 }
 
 /**
- * AI 의 PredictionResult 를 화면이 쓰는 모양으로 맞춘다.
- * 백엔드가 분석 API 를 열면 이 변환은 백엔드 쪽으로 옮겨간다.
+ * 수동 ROI 추적 + 특징추출 + 분류.
+ *
+ * @param {object} p
+ * @param {string} p.sourceVideoId
+ * @param {string} p.videoPath
+ * @param {number} p.initFrameIndex
+ * @param {[number,number,number,number]} p.targetBbox  원본 픽셀 [x, y, w, h]
+ * @param {boolean} p.stabilize
+ * @param {number} p.resizeWidth
+ * @param {number|null} p.maxSeconds
+ * @param {object} p.tuning  DEFAULT_TUNING 과 같은 모양
  */
-function toAnalysisDto(analysisId, clipId, prediction, elapsedMs) {
-  if (!prediction) {
-    return { analysisId, clipId, status: 'FAILED', message: 'AI 응답에 prediction 이 없습니다.' }
+export async function runManualTracking(p) {
+  const payload = {
+    source_video_id: p.sourceVideoId,
+    video_path: p.videoPath,
+    init_frame_index: p.initFrameIndex,
+    // AI 도 원본 픽셀 좌표를 기대한다.
+    // (manual_roi_tracker._scale_initial_bbox 가 내부에서 처리 해상도로 환산)
+    target_bbox: p.targetBbox,
+    stabilize: p.stabilize,
+    resize_width: p.resizeWidth,
+    write_overlay: true,
+    tuning: {
+      klt_accept_conf: p.tuning.kltAcceptConf,
+      recovery_conf: p.tuning.recoveryConf,
+      update_conf: p.tuning.updateConf,
+      search_radius_multiplier: p.tuning.searchRadius,
+      online_update_enabled: p.tuning.onlineUpdate,
+    },
   }
+  // ManualTrackingRequest 는 extra="forbid" 이고 max_seconds 는 gt=0 이다.
+  // null 을 넣으면 거부되므로 값이 있을 때만 싣는다.
+  if (Number.isFinite(p.maxSeconds) && p.maxSeconds > 0) payload.max_seconds = p.maxSeconds
+
+  return send(`${AI_BASE}/api/tracks/manual`, { json: payload })
+}
+
+/** AI 의 PredictionResult 를 화면이 쓰는 모양으로 맞춘다. */
+export function toAnalysisDto(prediction, { analysisId, clipId, elapsedMs } = {}) {
+  if (!prediction) return null
 
   const quality = prediction.quality
   return {
@@ -150,4 +108,110 @@ function toAnalysisDto(analysisId, clipId, prediction, elapsedMs) {
     } : null,
     topFeatures: prediction.top_features || null,
   }
+}
+
+// 실시간 화면용 작업 테이블
+// 화면은 202 + 폴링을 전제로 짜여 있는데 AI 는 동기 처리라 여기서 모양을 맞춘다.
+
+/** analysisId -> { status, result, error } */
+const jobs = new Map()
+let sequence = 0
+
+export async function createAnalysis(clipId, payload, context = {}) {
+  if (!context.videoUrl) {
+    throw Object.assign(new Error('클립 영상 주소가 없어 AI 로 보낼 수 없습니다.'), {
+      status: 400, code: 'NO_VIDEO_URL',
+    })
+  }
+
+  sequence += 1
+  const analysisId = `ai_${Date.now().toString(36)}${sequence.toString(36)}`
+  jobs.set(analysisId, { status: 'RUNNING', result: null, error: null })
+
+  run(analysisId, clipId, payload, context.videoUrl)
+  return { analysisId, status: 'PENDING' }
+}
+
+export async function fetchAnalysis(analysisId) {
+  const job = jobs.get(analysisId)
+  if (!job) {
+    throw Object.assign(new Error('분석 작업을 찾을 수 없습니다.'), { status: 404 })
+  }
+  if (job.status === 'FAILED') {
+    return { analysisId, status: 'FAILED', message: job.error?.message }
+  }
+  if (job.status === 'DONE') return job.result
+  return { analysisId, status: job.status }
+}
+
+export async function fetchAnalysisHistory() {
+  return [...jobs.values()].filter((job) => job.status === 'DONE').map((job) => job.result)
+}
+
+async function run(analysisId, clipId, payload, videoUrl) {
+  const startedAt = Date.now()
+  try {
+    const videoResponse = await fetch(videoUrl)
+    if (!videoResponse.ok) throw new Error(`클립 영상을 읽지 못했습니다 (${videoResponse.status})`)
+
+    const uploaded = await uploadVideo(await videoResponse.blob(), `${clipId}.mp4`)
+    const tracked = await runManualTracking({
+      sourceVideoId: uploaded.source_video_id,
+      videoPath: uploaded.video_path,
+      initFrameIndex: payload.initFrameIndex,
+      targetBbox: payload.targetBbox,
+      stabilize: true,
+      resizeWidth: 1280,
+      maxSeconds: null,
+      tuning: DEFAULT_TUNING,
+    })
+
+    const dto = toAnalysisDto(tracked.prediction, {
+      analysisId, clipId, elapsedMs: Date.now() - startedAt,
+    })
+    jobs.set(analysisId, {
+      status: 'DONE',
+      result: {
+        ...dto,
+        // overlay.mp4 는 OpenCV 'mp4v' 라 브라우저가 못 읽는다. 화면은 이 track 을
+        // 받아 캔버스로 직접 그린다 (TrackOverlay.vue). url 은 다운로드용으로만 둔다.
+        overlayUrl: toProxiedUrl(tracked.download_urls?.overlay),
+        track: tracked.tracks?.[0] || null,
+        fps: tracked.metadata?.fps || null,
+      },
+      error: null,
+    })
+  } catch (error) {
+    jobs.set(analysisId, { status: 'FAILED', result: null, error })
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+async function send(url, { json, body }) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: json ? { 'Content-Type': 'application/json' } : undefined,
+    body: json ? JSON.stringify(json) : body,
+  })
+  const text = await response.text()
+  const parsed = text ? safeParse(text) : null
+  if (!response.ok) {
+    const detail = parsed?.detail || parsed?.message || text || response.statusText
+    throw new Error(`AI 오류 ${response.status}: ${formatDetail(detail)}`)
+  }
+  return parsed
+}
+
+/** FastAPI 검증 오류는 배열로 온다. 그대로 찍으면 [object Object] 가 된다. */
+function formatDetail(detail) {
+  if (Array.isArray(detail)) {
+    return detail.map((d) => `${(d.loc || []).join('.')} ${d.msg || ''}`.trim()).join(', ')
+  }
+  if (typeof detail === 'object' && detail !== null) return JSON.stringify(detail)
+  return String(detail)
+}
+
+function safeParse(text) {
+  try { return JSON.parse(text) } catch { return text }
 }

@@ -127,7 +127,22 @@ AI 가 주는 `processing_time_ms` 는 RF 분류기 내부 시간이라 100ms �
 
 백엔드가 `/api/clips/{id}/analysis` 를 열면 `backend` 로 바꾸고 이 파일은 지운다.
 
-## 10. 분석 이력 `GET /api/analyses`
+## 10. AI 의 overlay.mp4 는 브라우저에서 재생되지 않는다
+
+`ai_server/services/tracking_video_io.py` 가 OpenCV `VideoWriter_fourcc(*"mp4v")`
+로 오버레이를 쓴다. 결과물은 MPEG-4 Part 2(`codec_name=mpeg4`)이고, 브라우저는
+이 코덱을 디코딩하지 못한다. H.264(avc1) 만 재생된다. 실제로 붙여보니
+`readyState` 가 0 에서 올라가지 않았다.
+
+- 프론트: overlay.mp4 를 `<video>` 에 붙이지 않는다. 대신 응답의 `TrackSequence`
+  를 받아 원본 위에 캔버스로 직접 그린다 (`TrackOverlay.vue`). 오히려 원본
+  해상도로 보이고 프레임을 앞뒤로 돌릴 수 있다. overlay.mp4 는 다운로드로만 둔다.
+
+AI 쪽에서 고치려면 fourcc 를 `avc1` 로 바꾸거나 ffmpeg 로 H.264 재인코딩을
+한 번 거치면 된다. 다만 OpenCV 의 `avc1` 은 플랫폼마다 openh264 가 있어야 해서
+ffmpeg 쪽이 안전해 보인다. AI 레포 일이라 건드리지 않았다.
+
+## 11. 분석 이력 `GET /api/analyses`
 
 API 클라이언트 함수(`fetchAnalysisHistory`)는 만들어뒀지만 **화면은 만들지
 않았다.** 요청 범위(1~8단계)에 없었다. 현재 세션 동안의 이력은 클립 큐가 대신
