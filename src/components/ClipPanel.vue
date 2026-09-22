@@ -335,7 +335,7 @@ const timeLabel = computed(() => {
             v-if="!showOverlay"
             :video-el="videoEl"
             :source-box="sourceBox"
-            :disabled="state !== 'CLIP_READY'"
+            :active="state === 'CLIP_READY'"
             @update:source-box="sourceBox = $event"
             @draw-start="pauseForDrawing"
           />

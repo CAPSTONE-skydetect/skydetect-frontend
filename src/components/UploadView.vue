@@ -2,20 +2,22 @@
 /**
  * 업로드 분석 화면.
  *
- * 실시간 화면과 구조는 같다 (왼쪽 영상 / 오른쪽 분석). 다른 점은 영상의 출처다.
- * 라이브에서 잘라낸 클립 대신 사용자가 올린 파일을 A 파트 파이프라인에 그대로
- * 태우고, 오른쪽에 추적 오버레이 영상을 받아 띄운다.
+ * 동작은 CODEX 브랜치의 A 파트 수동 ROI UI 를 따른다.
  *
- *   왼쪽  업로드한 원본. 프레임을 고르고 ROI 박스를 그린다
- *   오른쪽 추적 설정 → 실행 → 오버레이 + 판정
+ *   위 왼쪽   업로드한 원본. 객체 선택 -> 프레임 고정 -> ROI 지정
+ *   위 오른쪽 추적 오버레이 재생 (궤적 + 프레임별 검출)
+ *   아래      추적 설정 + 실행 + 판정/지표/다운로드
  *
- * 백엔드를 거치지 않고 AI(8000)를 직접 부른다. 개발/검증용 화면이라 그렇다.
+ * 선택 모드가 있는 이유: ROI 는 "어느 프레임의" 어느 자리인지가 같이 정해져야
+ * 한다. 아무 때나 그릴 수 있게 두면 그린 뒤 프레임을 옮겼을 때 서버로 가는
+ * init_frame_index 와 박스가 서로 다른 순간을 가리킨다. 그래서 선택을 시작하는
+ * 순간 프레임을 고정하고(selectionFrame), 추적은 그 값으로 보낸다.
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import BoxOverlay from './BoxOverlay.vue'
+import OverlayPlayer from './OverlayPlayer.vue'
 import AnalysisResult from './AnalysisResult.vue'
 import TrackingTuning from './TrackingTuning.vue'
-import TrackOverlay from './TrackOverlay.vue'
 import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory } from '../lib/historyStore.js'
@@ -23,10 +25,12 @@ import {
   uploadVideo, runManualTracking, toAnalysisDto, toProxiedUrl, DEFAULT_TUNING,
 } from '../api/ai.js'
 
+/** 클릭만 했을 때 만드는 박스 크기. CODEX 기본값. */
+const CLICK_BOX_SIZE = 32
+
 // 영상 상태
 const fileInput = ref(null)
 const videoEl = ref(null)
-const resultVideoEl = ref(null)
 const objectUrl = ref(null)
 const fileName = ref('')
 const uploaded = ref(null)      // AI 가 돌려준 { source_video_id, video_path, metadata }
@@ -35,6 +39,8 @@ const uploadError = ref(null)
 
 // 선택 상태
 const sourceBox = ref(null)     // 원본 픽셀 {x, y, width, height}
+const selectionMode = ref(false)
+const selectionFrame = ref(null) // 선택을 시작한 순간 고정된 프레임
 const frameIndex = ref(0)
 const playing = ref(false)
 const geometryVersion = ref(0)
@@ -47,13 +53,14 @@ const options = ref({ stabilize: true, resizeWidth: 1280, maxSeconds: 10 })
 const running = ref(false)
 const runError = ref(null)
 const elapsed = ref(0)
-const result = ref(null)        // { analysis, metrics, urls, metadata, track }
+const result = ref(null)
 
 let elapsedTimer = null
 
 const meta = computed(() => uploaded.value?.metadata || null)
 const fps = computed(() => meta.value?.fps || 30)
-const lastFrame = computed(() => Math.max(0, (meta.value?.frame_count || 1) - 1))
+const frameCount = computed(() => meta.value?.frame_count || 0)
+const lastFrame = computed(() => Math.max(0, frameCount.value - 1))
 const canRun = computed(() => !!uploaded.value && !!sourceBox.value && !running.value)
 
 // 업로드 ------------------------------------------------------------------
@@ -69,7 +76,7 @@ async function onFilePicked(event) {
 
   try {
     // AI 는 서버 안의 파일 경로로만 작업하므로 먼저 올려야 한다.
-    // 왼쪽 재생은 올린 파일을 그대로 쓴다. 서버에서 다시 받아올 이유가 없다.
+    // 화면 재생은 올린 파일을 그대로 쓴다. 서버에서 다시 받아올 이유가 없다.
     uploaded.value = await uploadVideo(file)
   } catch (error) {
     uploadError.value = error
@@ -83,7 +90,7 @@ function reset() {
   objectUrl.value = null
   uploaded.value = null
   uploadError.value = null
-  sourceBox.value = null
+  clearSelection()
   frameIndex.value = 0
   playing.value = false
   result.value = null
@@ -96,6 +103,54 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
 })
 
+// 선택 --------------------------------------------------------------------
+
+/**
+ * 객체 선택 시작. 영상을 멈추고 지금 프레임을 고정한다.
+ * 이 시점의 프레임 번호가 그대로 init_frame_index 가 된다.
+ */
+function beginSelection() {
+  if (!uploaded.value) return
+  videoEl.value?.pause()
+  playing.value = false
+  selectionMode.value = true
+  selectionFrame.value = frameIndex.value
+}
+
+function clearSelection() {
+  sourceBox.value = null
+  selectionFrame.value = null
+  selectionMode.value = false
+}
+
+/** 다시 선택: 지우고 바로 선택 모드로 들어간다 (CODEX 와 같다). */
+function reselect() {
+  clearSelection()
+  beginSelection()
+}
+
+function onBoxPicked(box) {
+  sourceBox.value = box
+  if (box) {
+    selectionFrame.value = selectionFrame.value ?? frameIndex.value
+    // 박스가 정해지면 선택 모드를 빠져나온다. 확대경이 계속 떠 있으면 방해된다.
+    selectionMode.value = false
+  }
+}
+
+const selectionHint = computed(() => {
+  if (!uploaded.value) return '영상을 먼저 올리세요.'
+  if (selectionMode.value) {
+    return `프레임 ${selectionFrame.value} 고정. 객체 주변을 드래그하거나, `
+      + `짧게 클릭하면 ${CLICK_BOX_SIZE}px 박스를 만듭니다.`
+  }
+  if (sourceBox.value) {
+    return `frame ${selectionFrame.value} · ROI `
+      + `${Math.round(sourceBox.value.width)}x${Math.round(sourceBox.value.height)} 고정`
+  }
+  return '영상을 멈춘 뒤 객체 선택을 누르세요.'
+})
+
 // 프레임 조작 --------------------------------------------------------------
 
 function seekToFrame(index) {
@@ -105,12 +160,20 @@ function seekToFrame(index) {
   frameIndex.value = clamped
   // 프레임 i 는 [i/fps, (i+1)/fps) 구간이다. 경계로 seek 하면 i-1 이 잡힐 수 있다.
   video.currentTime = (clamped + 0.2) / fps.value
+  // 선택 모드 중에 프레임을 옮기면 고정 프레임도 따라간다.
+  if (selectionMode.value) selectionFrame.value = clamped
+}
+
+function seekToSeconds(seconds) {
+  const video = videoEl.value
+  if (!video || !Number.isFinite(seconds)) return
+  video.currentTime = Math.min(Math.max(0, seconds), video.duration || seconds)
 }
 
 function onTimeUpdate() {
   const video = videoEl.value
   if (!video || !fps.value) return
-  frameIndex.value = toFrameIndex(video.currentTime, fps.value, meta.value?.frame_count)
+  frameIndex.value = toFrameIndex(video.currentTime, fps.value, frameCount.value)
 }
 
 function onLoadedMetadata() {
@@ -124,19 +187,16 @@ onMounted(() => window.addEventListener('resize', onResize))
 function togglePlay() {
   const video = videoEl.value
   if (!video) return
+  // 선택 모드에서는 재생하지 않는다. 프레임이 고정돼 있어야 한다.
+  if (selectionMode.value) return
   if (video.paused) { video.play(); playing.value = true }
   else { video.pause(); playing.value = false }
 }
 
-function pauseForDrawing() {
-  const video = videoEl.value
-  if (video && !video.paused) { video.pause(); playing.value = false }
-}
-
-// bbox 숫자 입력. 드래그로 그린 값을 미세 조정할 수 있게 열어둔다.
+// ROI 숫자 입력. 드래그로 그린 값을 미세 조정할 수 있게 열어둔다.
 const boxFields = computed(() => {
   const box = sourceBox.value
-  if (!box) return { centerX: '', centerY: '', width: '', height: '' }
+  if (!box) return { centerX: '', centerY: '', width: CLICK_BOX_SIZE, height: CLICK_BOX_SIZE }
   return {
     centerX: Math.round(box.x + box.width / 2),
     centerY: Math.round(box.y + box.height / 2),
@@ -147,17 +207,25 @@ const boxFields = computed(() => {
 
 function setBoxField(key, rawValue) {
   const value = Number(rawValue)
-  if (!Number.isFinite(value)) return
-  const current = boxFields.value
-  const next = { ...current, [key]: value }
-  const width = Math.max(4, next.width || 4)
-  const height = Math.max(4, next.height || 4)
+  if (!Number.isFinite(value) || !meta.value) return
+
+  const next = { ...boxFields.value, [key]: value }
+  const width = Math.max(4, next.width || CLICK_BOX_SIZE)
+  const height = Math.max(4, next.height || CLICK_BOX_SIZE)
+  const frameWidth = meta.value.width
+  const frameHeight = meta.value.height
+
   sourceBox.value = {
-    x: (next.centerX || 0) - width / 2,
-    y: (next.centerY || 0) - height / 2,
-    width,
-    height,
+    x: clamp((next.centerX || 0) - width / 2, 0, Math.max(0, frameWidth - width)),
+    y: clamp((next.centerY || 0) - height / 2, 0, Math.max(0, frameHeight - height)),
+    width: Math.min(width, frameWidth),
+    height: Math.min(height, frameHeight),
   }
+  selectionFrame.value = selectionFrame.value ?? frameIndex.value
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max)
 }
 
 // 실행 --------------------------------------------------------------------
@@ -168,6 +236,7 @@ async function run() {
   runError.value = null
   result.value = null
   elapsed.value = 0
+  selectionMode.value = false
 
   const startedAt = Date.now()
   elapsedTimer = setInterval(() => { elapsed.value = Date.now() - startedAt }, 500)
@@ -180,12 +249,13 @@ async function run() {
     Math.round(sourceBox.value.width),
     Math.round(sourceBox.value.height),
   ]
+  const initFrame = selectionFrame.value ?? frameIndex.value
 
   try {
     const response = await runManualTracking({
       sourceVideoId: uploaded.value.source_video_id,
       videoPath: uploaded.value.video_path,
-      initFrameIndex: frameIndex.value,
+      initFrameIndex: initFrame,
       targetBbox: bbox,
       stabilize: options.value.stabilize,
       resizeWidth: options.value.resizeWidth,
@@ -213,8 +283,9 @@ async function run() {
         label: analysis.label,
         confidence: analysis.confidence,
         rejectReason: analysis.rejectReason,
+        featureReasons: response.features?.reasons || null,
         bbox,
-        initFrameIndex: frameIndex.value,
+        initFrameIndex: initFrame,
         quality: analysis.quality,
         topFeatures: analysis.topFeatures,
         metrics: response.metrics || null,
@@ -261,6 +332,19 @@ const scaleLabel = computed(() => {
     + ' (' + tf.scale.toFixed(3) + 'x)'
 })
 
+/** CODEX 의 결과 요약 한 줄과 같은 구성. */
+const resultSummary = computed(() => {
+  const r = result.value
+  if (!r) return null
+  const quality = r.track?.quality || {}
+  return [
+    `${quality.num_points ?? '-'} observed`,
+    `${pct(r.metrics?.visible_ratio)} visible`,
+    quality.track_stability || 'unknown',
+    r.metrics?.method || 'manual_roi',
+  ].join(' · ')
+})
+
 const metricRows = computed(() => {
   const r = result.value
   if (!r) return []
@@ -286,198 +370,221 @@ function pct(value) {
 }
 
 const elapsedLabel = computed(() => (elapsed.value / 1000).toFixed(0) + '초')
+const currentSeconds = computed(() => (frameIndex.value / (fps.value || 30)).toFixed(2))
 
-// 영상이 바뀌면 이전 결과는 의미가 없다.
 watch(objectUrl, () => { result.value = null })
 </script>
 
 <template>
   <main class="upload">
-    <!-- 왼쪽: 원본 -->
-    <section class="panel">
-      <div class="panel__head">
-        <span class="panel__title">원본 영상</span>
-        <span v-if="uploading" class="badge badge--warn"><span class="dot dot--pulse" />업로드 중</span>
-        <span v-else-if="uploaded" class="badge badge--ok"><span class="dot" />준비됨</span>
-        <div style="flex: 1" />
-        <span v-if="fileName" class="faint mono upload__name">{{ fileName }}</span>
-        <button v-if="uploaded" class="upload__change" @click="fileInput.click()">다른 영상</button>
-      </div>
-
-      <div class="panel__body">
-        <div v-if="!objectUrl" class="upload__drop">
-          <p class="dim">분석할 영상을 선택하세요</p>
-          <button class="upload__pick" @click="fileInput.click()">영상 선택</button>
-          <p class="faint">mp4 · avi · mov · mkv</p>
-          <p v-if="uploadError" class="upload__error">{{ uploadError.message }}</p>
+    <div class="upload__top">
+      <!-- 왼쪽: 원본 + ROI 지정 -->
+      <section class="panel">
+        <div class="panel__head">
+          <span class="panel__title">원본 영상</span>
+          <span v-if="uploading" class="badge badge--warn"><span class="dot dot--pulse" />업로드 중</span>
+          <span v-else-if="selectionMode" class="badge badge--warn">
+            <span class="dot dot--pulse" />선택 중 · frame {{ selectionFrame }}
+          </span>
+          <span v-else-if="sourceBox" class="badge badge--ok"><span class="dot" />ROI 지정됨</span>
+          <span v-else-if="uploaded" class="badge badge--ok"><span class="dot" />준비됨</span>
+          <div style="flex: 1" />
+          <span v-if="fileName" class="faint mono upload__name">{{ fileName }}</span>
+          <button v-if="uploaded" class="upload__change" @click="fileInput.click()">다른 영상</button>
         </div>
 
-        <template v-else>
-          <div class="upload__stage">
-            <video
-              ref="videoEl"
-              class="upload__video"
-              :src="objectUrl"
-              playsinline
-              muted
-              preload="auto"
-              @loadedmetadata="onLoadedMetadata"
-              @timeupdate="onTimeUpdate"
-              @ended="playing = false"
-            />
-            <BoxOverlay
-              :video-el="videoEl"
-              :source-box="sourceBox"
-              :disabled="!uploaded || running"
-              @update:source-box="sourceBox = $event"
-              @draw-start="pauseForDrawing"
-            />
+        <div class="panel__body">
+          <div v-if="!objectUrl" class="upload__drop">
+            <p class="dim">분석할 영상을 선택하세요</p>
+            <button class="upload__pick" @click="fileInput.click()">영상 선택</button>
+            <p class="faint">mp4 · avi · mov · mkv</p>
+            <p v-if="uploadError" class="upload__error">{{ uploadError.message }}</p>
           </div>
 
-          <div class="upload__scrub">
-            <button class="upload__icon" @click="togglePlay">{{ playing ? '❚❚' : '▶' }}</button>
-            <button class="upload__icon" @click="seekToFrame(frameIndex - 1)">◀</button>
-            <input
-              class="upload__range" type="range"
-              :min="0" :max="lastFrame" :value="frameIndex"
-              @input="seekToFrame(Number($event.target.value))"
-            />
-            <button class="upload__icon" @click="seekToFrame(frameIndex + 1)">▶</button>
-            <span class="mono upload__frame">
-              frame <b>{{ frameIndex }}</b> / {{ lastFrame }}
-              <span class="faint">· {{ fps.toFixed(0) }}fps</span>
-            </span>
-          </div>
+          <template v-else>
+            <div class="upload__stage">
+              <video
+                ref="videoEl"
+                class="upload__video"
+                :src="objectUrl"
+                playsinline
+                muted
+                preload="auto"
+                @loadedmetadata="onLoadedMetadata"
+                @timeupdate="onTimeUpdate"
+                @ended="playing = false"
+              />
+              <BoxOverlay
+                :video-el="videoEl"
+                :source-box="sourceBox"
+                :active="selectionMode && !running"
+                :click-box-size="CLICK_BOX_SIZE"
+                @update:source-box="onBoxPicked"
+              />
+            </div>
 
-          <!-- ROI 숫자 입력. 드래그로 그린 값을 미세 조정한다. -->
-          <div class="upload__roi">
-            <label class="field">
-              <span class="dim">시작 프레임</span>
+            <div class="upload__scrub">
+              <button
+                class="upload__icon"
+                :disabled="selectionMode"
+                :title="selectionMode ? '선택 중에는 재생하지 않는다' : ''"
+                @click="togglePlay"
+              >{{ playing ? '❚❚' : '▶' }}</button>
+              <button class="upload__icon" @click="seekToFrame(frameIndex - 1)">◀</button>
               <input
-                type="number" min="0" :max="lastFrame" :value="frameIndex"
+                class="upload__range" type="range"
+                :min="0" :max="lastFrame" :value="frameIndex"
                 @input="seekToFrame(Number($event.target.value))"
               />
-            </label>
-            <label class="field">
-              <span class="dim">중심 X</span>
-              <input
-                type="number" step="1" :value="boxFields.centerX" :disabled="!sourceBox"
-                @input="setBoxField('centerX', $event.target.value)"
-              />
-            </label>
-            <label class="field">
-              <span class="dim">중심 Y</span>
-              <input
-                type="number" step="1" :value="boxFields.centerY" :disabled="!sourceBox"
-                @input="setBoxField('centerY', $event.target.value)"
-              />
-            </label>
-            <label class="field">
-              <span class="dim">bbox W</span>
-              <input
-                type="number" min="4" step="1" :value="boxFields.width" :disabled="!sourceBox"
-                @input="setBoxField('width', $event.target.value)"
-              />
-            </label>
-            <label class="field">
-              <span class="dim">bbox H</span>
-              <input
-                type="number" min="4" step="1" :value="boxFields.height" :disabled="!sourceBox"
-                @input="setBoxField('height', $event.target.value)"
-              />
-            </label>
-          </div>
+              <button class="upload__icon" @click="seekToFrame(frameIndex + 1)">▶</button>
+              <span class="mono upload__frame">
+                frame <b>{{ frameIndex }}</b> / {{ lastFrame }}
+                <span class="faint">· {{ fps.toFixed(0) }}fps</span>
+              </span>
+            </div>
 
-          <div class="upload__coords">
-            <span class="faint mono">{{ scaleLabel }}</span>
-            <div style="flex: 1" />
-            <span v-if="sourceBox" class="mono upload__bbox">
-              bbox [{{ boxFields.centerX - Math.round(boxFields.width / 2) }},
-              {{ boxFields.centerY - Math.round(boxFields.height / 2) }},
-              {{ boxFields.width }}, {{ boxFields.height }}]
-            </span>
-            <span v-else class="faint">영상을 멈추고 비행체 주변을 드래그하세요</span>
-          </div>
-        </template>
-      </div>
-    </section>
+            <!-- 초기 객체 지정. CODEX 의 TARGET SETUP 과 같은 값들이다. -->
+            <div class="upload__roi">
+              <label class="field">
+                <span class="dim">시작 프레임</span>
+                <input
+                  type="number" min="0" :max="lastFrame"
+                  :value="selectionFrame ?? frameIndex"
+                  @change="seekToFrame(Number($event.target.value))"
+                />
+              </label>
+              <label class="field">
+                <span class="dim">현재 시간 (초)</span>
+                <input
+                  type="number" min="0" step="0.01" :value="currentSeconds"
+                  @change="seekToSeconds(Number($event.target.value))"
+                />
+              </label>
+              <label class="field">
+                <span class="dim">중심 X</span>
+                <input
+                  type="number" step="1" :value="boxFields.centerX" :disabled="!sourceBox"
+                  @change="setBoxField('centerX', $event.target.value)"
+                />
+              </label>
+              <label class="field">
+                <span class="dim">중심 Y</span>
+                <input
+                  type="number" step="1" :value="boxFields.centerY" :disabled="!sourceBox"
+                  @change="setBoxField('centerY', $event.target.value)"
+                />
+              </label>
+              <label class="field">
+                <span class="dim">bbox W</span>
+                <input
+                  type="number" min="4" step="1" :value="boxFields.width" :disabled="!sourceBox"
+                  @change="setBoxField('width', $event.target.value)"
+                />
+              </label>
+              <label class="field">
+                <span class="dim">bbox H</span>
+                <input
+                  type="number" min="4" step="1" :value="boxFields.height" :disabled="!sourceBox"
+                  @change="setBoxField('height', $event.target.value)"
+                />
+              </label>
+            </div>
 
-    <!-- 오른쪽: 분석 -->
-    <section class="panel">
-      <div class="panel__head">
-        <span class="panel__title">분석</span>
-        <span v-if="running" class="badge badge--warn">
-          <span class="dot dot--pulse" />추적 중 {{ elapsedLabel }}
-        </span>
-        <span v-else-if="result" class="badge badge--ok"><span class="dot" />완료</span>
-        <div style="flex: 1" />
-        <span class="faint mono upload__engine">AI 8000</span>
-      </div>
+            <div class="upload__select">
+              <button
+                class="upload__select-btn"
+                :disabled="!uploaded || selectionMode || running"
+                @click="beginSelection"
+              >객체 선택</button>
+              <button :disabled="!sourceBox || running" @click="reselect">다시 선택</button>
+              <span class="faint upload__hint">{{ selectionHint }}</span>
+            </div>
 
-      <div class="panel__body upload__right">
-        <!-- 결과가 없으면 설정, 있으면 오버레이가 위로 온다 -->
-        <template v-if="result">
-          <!-- A 파트 추적 오버레이.
-               AI 가 만든 overlay.mp4 는 OpenCV 'mp4v'(MPEG-4 Part 2)라 브라우저가
-               디코딩하지 못한다. 그래서 원본 위에 TrackSequence 를 직접 그린다.
-               overlay.mp4 는 아래 다운로드로 남겨둔다. -->
-          <div class="upload__stage upload__stage--overlay">
-            <video
-              ref="resultVideoEl"
-              class="upload__video"
-              :src="objectUrl"
-              controls playsinline loop muted
-            />
-            <TrackOverlay
-              v-if="result.track"
-              :video-el="resultVideoEl"
-              :track="result.track"
-              :fps="fps"
-            />
-          </div>
-          <p class="faint upload__note">
-            추적 결과를 원본 위에 그린 것이다. 초록 박스가 프레임별 검출,
-            파란 선이 궤적이다.
-          </p>
+            <div class="upload__coords">
+              <span class="faint mono">{{ scaleLabel }}</span>
+              <div style="flex: 1" />
+              <span v-if="sourceBox" class="mono upload__bbox">
+                bbox [{{ Math.round(sourceBox.x) }}, {{ Math.round(sourceBox.y) }},
+                {{ Math.round(sourceBox.width) }}, {{ Math.round(sourceBox.height) }}]
+              </span>
+            </div>
+          </template>
+        </div>
+      </section>
 
-          <AnalysisResult :analysis="result.analysis" @redraw="result = null" />
-
-          <dl class="upload__metrics">
-            <template v-for="[name, value] in metricRows" :key="name">
-              <dt class="faint">{{ name }}</dt>
-              <dd class="mono">{{ value }}</dd>
-            </template>
-          </dl>
-
-          <div class="upload__downloads">
-            <a v-if="result.urls.trackSequence" :href="result.urls.trackSequence" download>TrackSequence</a>
-            <a v-if="result.urls.trajectory" :href="result.urls.trajectory" download>Trajectory CSV</a>
-            <a v-if="result.urls.metrics" :href="result.urls.metrics" download>Metrics</a>
-            <a v-if="result.urls.overlay" :href="result.urls.overlay" download title="OpenCV mp4v 코덱이라 브라우저에서는 재생되지 않는다">Overlay (mp4v)</a>
-            <a v-if="result.urls.foregroundMask" :href="result.urls.foregroundMask" download>Foreground</a>
-          </div>
-        </template>
-
-        <div v-else-if="running" class="upload__waiting">
-          <div class="spinner" />
-          <p class="dim">추적 중 <b class="mono">{{ elapsedLabel }}</b></p>
-          <p class="faint">프레임 수와 해상도에 따라 수 분이 걸립니다.</p>
+      <!-- 오른쪽: 추적 오버레이 재생 -->
+      <section class="panel">
+        <div class="panel__head">
+          <span class="panel__title">추적 오버레이</span>
+          <span v-if="running" class="badge badge--warn">
+            <span class="dot dot--pulse" />추적 중 {{ elapsedLabel }}
+          </span>
+          <span v-else-if="result" class="badge badge--ok"><span class="dot" />완료</span>
+          <div style="flex: 1" />
+          <span v-if="resultSummary" class="faint mono upload__summary">{{ resultSummary }}</span>
         </div>
 
-        <TrackingTuning
-          v-if="!result"
-          v-model:tuning="tuning"
-          v-model:options="options"
-          :disabled="running"
+        <div class="panel__body">
+          <div v-if="running" class="upload__waiting">
+            <div class="spinner" />
+            <p class="dim">추적 중 <b class="mono">{{ elapsedLabel }}</b></p>
+            <p class="faint">프레임 수와 해상도에 따라 수 분이 걸립니다.</p>
+          </div>
+
+          <OverlayPlayer
+            v-else
+            :src="objectUrl"
+            :track="result?.track || null"
+            :fps="fps"
+            :frame-count="frameCount"
+          />
+        </div>
+      </section>
+    </div>
+
+    <!-- 아래: 추적 설정 + 실행 + 결과 -->
+    <section class="panel upload__bottom">
+      <TrackingTuning
+        v-model:tuning="tuning"
+        v-model:options="options"
+        :disabled="running"
+        layout="row"
+      />
+
+      <div class="upload__actions">
+        <button class="upload__run" :disabled="!canRun" @click="run">ROI 추적</button>
+        <span v-if="!uploaded" class="faint">영상을 먼저 올리세요</span>
+        <span v-else-if="!sourceBox" class="faint">객체 선택으로 ROI 를 지정하세요</span>
+        <p v-if="runError" class="upload__error">{{ runError.message }}</p>
+
+        <div style="flex: 1" />
+
+        <div v-if="result" class="upload__downloads">
+          <a v-if="result.urls.trackSequence" :href="result.urls.trackSequence" download>TrackSequence</a>
+          <a v-if="result.urls.trajectory" :href="result.urls.trajectory" download>Trajectory CSV</a>
+          <a v-if="result.urls.metrics" :href="result.urls.metrics" download>Metrics</a>
+          <a
+            v-if="result.urls.overlay" :href="result.urls.overlay" download
+            title="OpenCV mp4v 코덱이라 브라우저에서는 재생되지 않는다"
+          >Overlay (mp4v)</a>
+          <a v-if="result.urls.foregroundMask" :href="result.urls.foregroundMask" download>Foreground</a>
+        </div>
+      </div>
+
+      <template v-if="result">
+        <AnalysisResult
+          :analysis="result.analysis"
+          :feature-reasons="result.features?.reasons"
+          @redraw="result = null"
         />
 
-        <div v-if="!result" class="upload__actions">
-          <button class="upload__run" :disabled="!canRun" @click="run">ROI 추적</button>
-          <span v-if="!uploaded" class="faint">영상을 먼저 올리세요</span>
-          <span v-else-if="!sourceBox" class="faint">왼쪽에서 박스를 그리세요</span>
-          <p v-if="runError" class="upload__error">{{ runError.message }}</p>
-        </div>
-      </div>
+        <dl class="upload__metrics">
+          <template v-for="[name, value] in metricRows" :key="name">
+            <dt class="faint">{{ name }}</dt>
+            <dd class="mono">{{ value }}</dd>
+          </template>
+        </dl>
+      </template>
     </section>
 
     <input
@@ -494,14 +601,22 @@ watch(objectUrl, () => { result.value = null })
 .upload {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+.upload__top {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
+  min-height: 560px;
 }
+.upload__bottom { flex: none; }
 .upload__file { display: none; }
-.upload__name { font-size: 11px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.upload__name { font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.upload__summary { font-size: 11px; }
 .upload__change { padding: 3px 10px; font-size: 11px; }
-.upload__engine { font-size: 11px; }
 
 .upload__drop {
   flex: 1;
@@ -522,7 +637,6 @@ watch(objectUrl, () => { result.value = null })
   background: #05080c;
   overflow: hidden;
 }
-.upload__stage--overlay { flex: none; height: 300px; }
 .upload__video {
   width: 100%;
   height: 100%;
@@ -530,8 +644,6 @@ watch(objectUrl, () => { result.value = null })
   object-fit: contain;
   display: block;
 }
-.upload__nooverlay { display: grid; place-items: center; height: 100%; margin: 0; }
-.upload__note { margin: 0; padding: 8px 14px; font-size: 11px; }
 
 .upload__scrub {
   flex: none;
@@ -548,13 +660,26 @@ watch(objectUrl, () => { result.value = null })
 .upload__roi {
   flex: none;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid var(--border);
 }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
 .field input { padding: 6px 8px; font-size: 12px; }
+
+.upload__select {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+.upload__select-btn { background: var(--accent-dim); border-color: var(--accent); font-weight: 600; }
+.upload__select-btn:hover:not(:disabled) { background: #2a6396; }
+.upload__hint { font-size: 11px; flex: 1; min-width: 200px; }
 
 .upload__coords {
   flex: none;
@@ -568,14 +693,13 @@ watch(objectUrl, () => { result.value = null })
 }
 .upload__bbox { color: var(--accent); }
 
-.upload__right { overflow-y: auto; }
-
 .upload__waiting {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  padding: 32px 16px;
   text-align: center;
 }
 .upload__waiting p { margin: 0; }
@@ -592,29 +716,12 @@ watch(objectUrl, () => { result.value = null })
   background: var(--accent-dim);
   border-color: var(--accent);
   font-weight: 600;
-  padding: 10px 20px;
+  padding: 10px 22px;
 }
 .upload__run:hover:not(:disabled) { background: #2a6396; }
-.upload__error { color: var(--danger); font-size: 12px; margin: 0; width: 100%; }
+.upload__error { color: var(--danger); font-size: 12px; margin: 0; }
 
-.upload__metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px 12px;
-  margin: 0;
-  padding: 12px 14px;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-}
-.upload__metrics dt { font-size: 11px; }
-.upload__metrics dd { margin: 0; }
-
-.upload__downloads {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 0 14px 14px;
-}
+.upload__downloads { display: flex; gap: 8px; flex-wrap: wrap; }
 .upload__downloads a {
   font-size: 11px;
   padding: 5px 10px;
@@ -625,9 +732,24 @@ watch(objectUrl, () => { result.value = null })
 }
 .upload__downloads a:hover { color: var(--text); border-color: var(--accent-dim); }
 
+.upload__metrics {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.upload__metrics dt { font-size: 11px; }
+.upload__metrics dd { margin: 0; overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 1300px) {
+  .upload__metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 @media (max-width: 1100px) {
-  .upload { grid-template-columns: minmax(0, 1fr); grid-auto-rows: min-content; }
-  .upload > * { min-height: 360px; }
+  .upload__top { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .upload__top > * { min-height: 420px; }
   .upload__roi { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 </style>

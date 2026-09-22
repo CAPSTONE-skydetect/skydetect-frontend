@@ -19,6 +19,8 @@ const props = defineProps({
   /** { stabilize, resizeWidth, maxSeconds } */
   options: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
+  /** 'column' 세로 패널용, 'row' 화면 아래 가로 바용 */
+  layout: { type: String, default: 'column' },
 })
 
 const emit = defineEmits(['update:tuning', 'update:options'])
@@ -47,7 +49,7 @@ const isDefault = computed(() =>
 </script>
 
 <template>
-  <div class="tuning" :class="{ 'tuning--disabled': disabled }">
+  <div class="tuning" :class="[`tuning--${layout}`, { 'tuning--disabled': disabled }]">
     <div class="tuning__head">
       <span class="tuning__title">추적 설정</span>
       <div style="flex: 1" />
@@ -56,6 +58,7 @@ const isDefault = computed(() =>
       </button>
     </div>
 
+    <div class="tuning__fields">
     <div class="tuning__row">
       <label class="field">
         <span class="dim">추적 시간 (초)</span>
@@ -163,19 +166,26 @@ const isDefault = computed(() =>
       />
       <small class="faint">빠른 객체일수록 크게 설정하세요.</small>
     </label>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.tuning {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 14px;
-}
+.tuning { padding: 14px; }
 .tuning--disabled { opacity: 0.55; }
 
-.tuning__head { display: flex; align-items: center; gap: 8px; }
+.tuning__fields { display: flex; flex-direction: column; gap: 14px; }
+
+/* 화면 아래 가로 바. 항목을 여러 열로 펼쳐 세로 높이를 줄인다. */
+.tuning--row .tuning__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px 20px;
+  align-items: start;
+}
+.tuning--row .tuning__row { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.tuning__head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .tuning__title { font-weight: 600; font-size: 13px; }
 .tuning__reset {
   padding: 3px 10px;

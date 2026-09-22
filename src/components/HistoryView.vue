@@ -19,11 +19,22 @@ const LABEL = {
   uncertain: { text: '판단불가', tone: 'warn' },
 }
 
+// 문구는 CODEX 브랜치 UI 의 REJECT_TEXT / REASON_TEXT 와 같다.
 const REJECT_REASON = {
-  short_track: '추적된 구간이 너무 짧다',
-  feature_error: '특징 계산에 실패했다',
-  high_noise: '관측 잡음이 커서 궤적을 믿기 어렵다',
-  low_confidence: '분류 신뢰도가 기준에 못 미쳤다',
+  short_track: '추적된 프레임이 너무 적습니다. 더 긴 구간을 지정해 주세요.',
+  feature_error: '피처 계산에 실패했습니다.',
+  high_noise: '추적이 불안정합니다 (결측·지터 과다). 대비가 뚜렷한 구간을 다시 지정해 주세요.',
+  low_confidence: '관측 신뢰도가 낮습니다. ROI를 대상에 더 정확히 맞춰 주세요.',
+}
+
+const FEATURE_REASON = {
+  insufficient_points: '관측된 점이 너무 적습니다.',
+  insufficient_duration: '추적 구간이 너무 짧습니다.',
+  excessive_missing_fraction: '추적이 끊긴 구간이 너무 많습니다.',
+  no_usable_contiguous_segment: '연속으로 이어진 구간이 없습니다.',
+  partial_timestamps: '일부 프레임에 타임스탬프가 없습니다.',
+  nonfinite_features: '피처 계산 결과가 유효하지 않습니다.',
+  nonfinite_input: '추적 좌표에 유효하지 않은 값이 있습니다.',
 }
 
 const STABILITY = { good: '양호', fair: '보통', poor: '불량' }
@@ -184,6 +195,11 @@ const tuningRows = computed(() => {
             </template>
           </p>
 
+          <p v-if="(selected.featureReasons || []).length" class="detail__reason detail__reason--feature">
+            <b>피처 단계</b> ·
+            {{ selected.featureReasons.map((c) => FEATURE_REASON[c] || c).join(' / ') }}
+          </p>
+
           <p v-if="selected.rejectReason" class="detail__reason">
             <b>사유</b> · {{ REJECT_REASON[selected.rejectReason] || selected.rejectReason }}
             <span class="faint mono">({{ selected.rejectReason }})</span>
@@ -334,6 +350,7 @@ const tuningRows = computed(() => {
 .detail__note { font-size: 11px; margin: 0; line-height: 1.5; }
 .detail__note a { color: var(--accent); }
 
+.detail__reason--feature { background: #23252b; color: var(--text-dim); }
 .detail__reason {
   margin: 0;
   padding: 9px 11px;
