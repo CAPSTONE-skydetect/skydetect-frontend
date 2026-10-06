@@ -8,8 +8,12 @@
  *
  * AI 는 uncertain 일 때 confidence 를 0.0 으로 준다. 신뢰도 0% 가 아니라
  * 점수를 매기지 않았다는 뜻이라 0% 막대 대신 다르게 표시한다.
+ *
+ * MiniRocket 은 확률이 아니라 Ridge margin(decision_score)을 준다. 양수면 드론,
+ * 음수면 새 쪽이다. %로 바꾸면 확률로 오해하므로 부호 있는 점수 그대로 보여준다.
  */
 import { computed } from 'vue'
+import { modelLabel } from '../lib/aiModel.js'
 
 const props = defineProps({
   analysis: { type: Object, required: true },
@@ -37,6 +41,10 @@ const REJECT_REASON = {
   feature_error: '피처 계산에 실패했습니다.',
   high_noise: '추적이 불안정합니다 (결측·지터 과다). 대비가 뚜렷한 구간을 다시 지정해 주세요.',
   low_confidence: '관측 신뢰도가 낮습니다. ROI를 대상에 더 정확히 맞춰 주세요.',
+  // MiniRocket 보류 사유 (abstain_reason)
+  invalid_input: '입력 궤적이 모델 계약에 맞지 않습니다 (보정 좌표·FPS 등).',
+  insufficient_observation: '2초 분석 창을 만들 만큼 관측이 없습니다. 더 긴 구간을 지정해 주세요.',
+  low_separation: '새와 드론 점수 차이가 작아 판정을 보류했습니다.',
 }
 
 /** B(피처 추출)가 계산을 거부한 사유. research.features 가 내는 코드다. */
@@ -59,6 +67,15 @@ const label = computed(() => LABEL[props.analysis.label] || {
 })
 
 const isUncertain = computed(() => props.analysis.label === 'uncertain')
+
+const isMiniRocket = computed(() => props.analysis.model === 'minirocket')
+
+/** MiniRocket margin. 부호를 붙여 방향(드론 +, 새 -)이 보이게 한다. */
+const scoreText = computed(() => {
+  const score = props.analysis.decisionScore
+  if (score == null) return '-'
+  return (score > 0 ? '+' : '') + score.toFixed(2)
+})
 
 const confidencePercent = computed(() => Math.round((props.analysis.confidence || 0) * 100))
 
@@ -103,7 +120,17 @@ const processingLabel = computed(() => {
     <div class="result__head">
       <span class="result__label">{{ label.text }}</span>
 
-      <div v-if="!isUncertain" class="result__conf">
+      <div v-if="!isUncertain && isMiniRocket" class="result__conf">
+        <div class="result__conf-row">
+          <span class="dim">판정 점수</span>
+          <b class="mono">{{ scoreText }}</b>
+        </div>
+        <span class="faint result__score-note">
+          Ridge margin · 확률 아님<template v-if="analysis.windowsUsed"> · 2초 창 {{ analysis.windowsUsed }}개</template>
+        </span>
+      </div>
+
+      <div v-else-if="!isUncertain" class="result__conf">
         <div class="result__conf-row">
           <span class="dim">신뢰도</span>
           <b class="mono">{{ confidencePercent }}%</b>
@@ -119,12 +146,16 @@ const processingLabel = computed(() => {
       </div>
 
       <div style="flex: 1" />
+      <span v-if="analysis.model" class="badge mono" :title="analysis.modelVersion || ''">
+        {{ modelLabel(analysis.model) }}
+      </span>
       <button @click="$emit('redraw')">다시 지정</button>
     </div>
 
     <p v-if="reasonText" class="result__reason">
       <b>사유</b> · {{ reasonText }}
       <span class="faint mono">({{ analysis.rejectReason }})</span>
+      <span v-if="analysis.rejectDetail" class="faint"> · {{ analysis.rejectDetail }}</span>
     </p>
 
     <p v-if="featureReasonTexts.length" class="result__reason result__reason--feature">
@@ -138,7 +169,7 @@ const processingLabel = computed(() => {
         <span class="faint">추적 {{ quality.numPoints }}프레임</span>
         <span class="faint">평균 신뢰도 {{ (quality.meanConf * 100).toFixed(0) }}%</span>
         <span class="faint">트랙 품질 {{ STABILITY[quality.trackStability] || quality.trackStability }}</span>
-        <span class="faint">특징 {{ FEATURE_STATUS[quality.featureStatus] || quality.featureStatus }}</span>
+        <span v-if="quality.featureStatus" class="faint">특징 {{ FEATURE_STATUS[quality.featureStatus] || quality.featureStatus }}</span>
       </template>
     </div>
 
@@ -171,6 +202,7 @@ const processingLabel = computed(() => {
 }
 .result__conf { min-width: 150px; display: flex; flex-direction: column; gap: 5px; }
 .result__conf-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.result__score-note { font-size: 11px; }
 .result__bar {
   height: 5px;
   background: var(--border);

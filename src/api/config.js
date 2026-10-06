@@ -30,8 +30,7 @@ export const ANALYSIS_SOURCE = pick(
 /** 라이브 HLS 플레이리스트. 기본값은 네트워크 없이도 도는 로컬 파일. */
 export const HLS_URL = import.meta.env.VITE_HLS_URL || '/mock/hls/live.m3u8'
 
-/** AI 서버 프록시 접두어 (vite.config.js 의 /ai 규칙과 짝이다) */
-export const AI_BASE = '/ai'
+/* AI 서버 프록시 접두어는 판정 모델마다 다르다. lib/aiModel.js 의 aiBase() 를 쓴다. */
 
 /** 상태 폴링 간격. SSE/WebSocket 은 백엔드 미구현이라 폴링이 전제다. */
 export const POLL_INTERVAL_MS = 1_000

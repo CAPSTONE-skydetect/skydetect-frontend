@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 
 const BACKEND = process.env.VITE_BACKEND_ORIGIN || 'http://localhost:8080'
 const AI = process.env.VITE_AI_ORIGIN || 'http://localhost:8000'
+const AI_MINIROCKET = process.env.VITE_AI_MINIROCKET_ORIGIN || 'http://localhost:8001'
 
 export default defineConfig({
   plugins: [vue()],
@@ -16,11 +17,18 @@ export default defineConfig({
       '/api': { target: BACKEND, changeOrigin: false },
       '/hls': { target: BACKEND, changeOrigin: false },
 
-      // AI 서버(FastAPI, 기본 8000). 라우트가 백엔드와 똑같이 /api 로 시작해서
-      // 충돌하므로 /ai 접두어를 붙여 구분하고 중계할 때 떼어낸다.
-      //   /ai/health            -> :8000/health
-      //   /ai/api/tracks/manual -> :8000/api/tracks/manual
-      '/ai': {
+      // AI 서버(FastAPI). 라우트가 백엔드와 똑같이 /api 로 시작해서
+      // 충돌하므로 접두어를 붙여 구분하고 중계할 때 떼어낸다.
+      // 판정 모델마다 서버가 따로 떠서 접두어도 둘이다 (src/lib/aiModel.js).
+      //   /ai/health                       -> RF         :8000/health
+      //   /ai-minirocket/api/tracks/manual -> MiniRocket :8001/api/tracks/manual
+      // 끝의 / 까지 넣어야 /ai 규칙이 /ai-minirocket 을 가로채지 않는다.
+      '/ai-minirocket/': {
+        target: AI_MINIROCKET,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ai-minirocket/, ''),
+      },
+      '/ai/': {
         target: AI,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ai/, ''),
