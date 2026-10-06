@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.git/
+.claude/
+# 빌드 설정은 compose 의 build.args 로만 받는다
+.env
+.env.local
