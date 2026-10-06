@@ -39,6 +39,7 @@ const uploaded = ref(null)      // AI 가 돌려준 { source_video_id, video_pat
 let pickedFile = null           // 판정 모델을 바꾸면 그 서버에 다시 올려야 해서 들고 있는다
 const uploading = ref(false)
 const uploadError = ref(null)
+const previewError = ref(false) // 브라우저가 영상을 재생하지 못함 (코덱)
 
 // 선택 상태
 const sourceBox = ref(null)     // 원본 픽셀 {x, y, width, height}
@@ -81,10 +82,21 @@ async function onFilePicked(event) {
 
   try {
     // AI 는 서버 안의 파일 경로로만 작업하므로 먼저 올려야 한다.
-    // 화면 재생은 올린 파일을 그대로 쓴다. 서버에서 다시 받아올 이유가 없다.
+    // 화면 재생은 보통 올린 파일을 그대로 쓴다. 서버에서 다시 받아올 이유가 없다.
     pickedFile = file
     const model = aiModel.value
     uploaded.value = { ...(await uploadVideo(file, undefined, aiBase(model))), model }
+
+    // 브라우저가 재생 못 하는 코덱(MPEG-2 등)이면 AI 가 H.264 mp4 로 바꿔 둔다.
+    // 추적도 그 파일로 하므로 화면도 같은 파일을 재생해야 프레임 번호가 맞는다.
+    if (uploaded.value.transcoded) {
+      const serverUrl = toProxiedUrl(uploaded.value.download_urls?.source_video, aiBase(model))
+      if (serverUrl) {
+        URL.revokeObjectURL(objectUrl.value)
+        objectUrl.value = serverUrl
+        previewError.value = false
+      }
+    }
   } catch (error) {
     uploadError.value = error
   } finally {
@@ -98,11 +110,17 @@ function reset() {
   uploaded.value = null
   pickedFile = null
   uploadError.value = null
+  previewError.value = false
   clearSelection()
   frameIndex.value = 0
   playing.value = false
   result.value = null
   runError.value = null
+}
+
+/** 재생 실패. 업로드 중이면 서버가 변환해 줄 수 있으니 결과를 기다린다. */
+function onVideoError() {
+  previewError.value = true
 }
 
 onBeforeUnmount(() => {
@@ -462,7 +480,13 @@ watch(objectUrl, () => { result.value = null })
             <span class="dot dot--pulse" />선택 중 · frame {{ selectionFrame }}
           </span>
           <span v-else-if="sourceBox" class="badge badge--ok"><span class="dot" />ROI 지정됨</span>
+          <span v-else-if="uploaded && previewError" class="badge badge--error"><span class="dot" />재생 불가</span>
           <span v-else-if="uploaded" class="badge badge--ok"><span class="dot" />준비됨</span>
+          <span
+            v-if="uploaded?.transcoded"
+            class="badge"
+            :title="`원본 코덱 ${uploaded.original_codec || '알 수 없음'} → 브라우저 재생용 H.264 로 변환`"
+          >H.264 변환됨</span>
           <div style="flex: 1" />
           <span v-if="fileName" class="faint mono upload__name">{{ fileName }}</span>
           <button v-if="uploaded" class="upload__change" @click="fileInput.click()">다른 영상</button>
@@ -488,7 +512,12 @@ watch(objectUrl, () => { result.value = null })
                 @loadedmetadata="onLoadedMetadata"
                 @timeupdate="onTimeUpdate"
                 @ended="playing = false"
+                @error="onVideoError"
               />
+              <p v-if="previewError && !uploading" class="upload__error upload__preview-error">
+                브라우저에서 재생할 수 없는 영상입니다 (코덱).
+                H.264 mp4 로 변환해서 다시 올려 주세요.
+              </p>
               <BoxOverlay
                 :video-el="videoEl"
                 :source-box="sourceBox"
@@ -863,5 +892,13 @@ watch(objectUrl, () => { result.value = null })
   .upload__top { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .upload__top > * { min-height: 420px; }
   .target__fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.upload__preview-error {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 80%;
+  text-align: center;
 }
 </style>
