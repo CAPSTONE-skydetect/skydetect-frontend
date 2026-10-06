@@ -6,12 +6,16 @@
  * 한계는 historyStore 주석에 적어뒀고, 화면 아래에도 한 줄로 띄운다.
  * 없는 걸 있는 것처럼 보이면 나중에 "기록이 왜 사라졌지"가 된다.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { listHistory, removeHistory, clearHistory } from '../lib/historyStore.js'
 import { modelLabel } from '../lib/aiModel.js'
+import DecisionEvidence from './DecisionEvidence.vue'
 
 const entries = ref([])
 const selectedId = ref(null)
+/** 판단 근거 펼침. 다른 기록을 고르면 접는다. */
+const showEvidence = ref(false)
+watch(selectedId, () => { showEvidence.value = false })
 const filter = ref('all')  // all | bird | drone | uncertain
 
 const LABEL = {
@@ -210,6 +214,13 @@ const tuningRows = computed(() => {
             <span class="faint mono">({{ selected.rejectReason }})</span>
           </p>
 
+          <button
+            class="detail__toggle"
+            :aria-expanded="showEvidence"
+            @click="showEvidence = !showEvidence"
+          >판단 근거 {{ showEvidence ? '▴' : '▾' }}</button>
+          <DecisionEvidence v-if="showEvidence" :analysis="selected" />
+
           <dl class="detail__grid">
             <dt class="faint">판정 모델</dt>
             <dd>{{ selected.model ? modelLabel(selected.model) : 'RF' }}</dd>
@@ -352,6 +363,7 @@ const tuningRows = computed(() => {
 .detail__video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .detail__nomedia { display: grid; place-items: center; height: 100%; margin: 0; }
 .detail__note { font-size: 12px; margin: 0; }
+.detail__toggle { align-self: flex-start; }
 .detail__note a { color: var(--accent); }
 
 .detail__reason--feature { background: #23252b; color: var(--text-dim); }

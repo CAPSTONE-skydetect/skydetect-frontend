@@ -18,7 +18,7 @@ import AnalysisResult from './AnalysisResult.vue'
 import TrackOverlay from './TrackOverlay.vue'
 import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
-import { addHistory } from '../lib/historyStore.js'
+import { addHistory, evidenceOf } from '../lib/historyStore.js'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -80,6 +80,7 @@ watch(() => clip.value?.analysis, (analysis) => {
     initFrameIndex: analysis.request?.initFrameIndex ?? frameIndex.value,
     quality: analysis.quality || null,
     topFeatures: analysis.topFeatures || null,
+    ...evidenceOf(analysis),
     metrics: null,
     tuning: null,
     processingTimeMs: analysis.processingTimeMs,

@@ -20,10 +20,10 @@ import AnalysisResult from './AnalysisResult.vue'
 import TrackingTuning from './TrackingTuning.vue'
 import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
-import { addHistory } from '../lib/historyStore.js'
+import { addHistory, evidenceOf } from '../lib/historyStore.js'
 import { aiModel, aiBase } from '../lib/aiModel.js'
 import {
-  uploadVideo, runManualTracking, toAnalysisDto, toProxiedUrl,
+  uploadVideo, runManualTracking, toAnalysisDto, toProxiedUrl, trackStartSeconds,
   fetchTrajectory, pointsFromHistory, DEFAULT_TUNING,
 } from '../api/ai.js'
 
@@ -304,11 +304,14 @@ async function run() {
     const response = await runManualTracking(request, base)
 
     const elapsedMs = Date.now() - startedAt
+    const track = response.tracks?.[0] || null
     const analysis = toAnalysisDto(response.prediction, {
-      elapsedMs, model: response.model || model,
+      elapsedMs,
+      model: response.model || model,
+      featureValues: response.features?.values || null,
+      trackStartS: trackStartSeconds(track),
     })
     const urls = mapUrls(response.download_urls, base)
-    const track = response.tracks?.[0] || null
 
     // 화면에 겹쳐 그릴 좌표는 궤적 CSV 의 raw 값을 쓴다.
     // track.history 는 카메라 움직임 보정 좌표라 실제 위치와 어긋난다.
@@ -341,6 +344,7 @@ async function run() {
         initFrameIndex: initFrame,
         quality: analysis.quality,
         topFeatures: analysis.topFeatures,
+        ...evidenceOf(analysis),
         metrics: response.metrics || null,
         tuning: { ...tuning.value, ...options.value },
         processingTimeMs: elapsedMs,

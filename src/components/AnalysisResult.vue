@@ -12,8 +12,9 @@
  * MiniRocket 은 확률이 아니라 Ridge margin(decision_score)을 준다. 양수면 드론,
  * 음수면 새 쪽이다. %로 바꾸면 확률로 오해하므로 부호 있는 점수 그대로 보여준다.
  */
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { modelLabel } from '../lib/aiModel.js'
+import DecisionEvidence from './DecisionEvidence.vue'
 
 const props = defineProps({
   analysis: { type: Object, required: true },
@@ -69,6 +70,10 @@ const label = computed(() => LABEL[props.analysis.label] || {
 const isUncertain = computed(() => props.analysis.label === 'uncertain')
 
 const isMiniRocket = computed(() => props.analysis.model === 'minirocket')
+
+/** 판단 근거 펼침. 새 결과가 오면 접는다. */
+const showEvidence = ref(false)
+watch(() => props.analysis, () => { showEvidence.value = false })
 
 /** MiniRocket margin. 부호를 붙여 방향(드론 +, 새 -)이 보이게 한다. */
 const scoreText = computed(() => {
@@ -149,6 +154,12 @@ const processingLabel = computed(() => {
       <span v-if="analysis.model" class="badge mono" :title="analysis.modelVersion || ''">
         {{ modelLabel(analysis.model) }}
       </span>
+      <button
+        class="result__toggle"
+        :class="{ 'result__toggle--on': showEvidence }"
+        :aria-expanded="showEvidence"
+        @click="showEvidence = !showEvidence"
+      >판단 근거 {{ showEvidence ? '▴' : '▾' }}</button>
       <button @click="$emit('redraw')">다시 지정</button>
     </div>
 
@@ -163,6 +174,8 @@ const processingLabel = computed(() => {
       <span class="faint mono">({{ featureReasons.join(', ') }})</span>
     </p>
 
+    <DecisionEvidence v-if="showEvidence" :analysis="analysis" />
+
     <div class="result__meta">
       <span v-if="processingLabel" class="faint">처리 {{ processingLabel }}</span>
       <template v-if="quality">
@@ -174,7 +187,7 @@ const processingLabel = computed(() => {
     </div>
 
     <div v-if="topFeatures.length" class="result__features">
-      <span class="faint">주요 특징</span>
+      <span class="faint" title="이 궤적이 아니라 RF 모델 전체에서 많이 쓰는 피처">모델 전체 주요 특징</span>
       <span v-for="[name, weight] in topFeatures" :key="name" class="badge mono result__feature">
         {{ name }} {{ weight.toFixed(2) }}
       </span>
@@ -203,6 +216,7 @@ const processingLabel = computed(() => {
 .result__conf { min-width: 150px; display: flex; flex-direction: column; gap: 5px; }
 .result__conf-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
 .result__score-note { font-size: 11px; }
+.result__toggle--on { border-color: var(--accent); color: var(--text); }
 .result__bar {
   height: 5px;
   background: var(--border);
