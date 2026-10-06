@@ -496,7 +496,7 @@ watch(objectUrl, () => { result.value = null })
           <div v-if="!objectUrl" class="upload__drop">
             <p class="dim">분석할 영상을 선택하세요</p>
             <button class="upload__pick" @click="fileInput.click()">영상 선택</button>
-            <p class="faint">mp4 · avi · mov · mkv</p>
+            <p class="faint">mp4 · avi · mov · mkv · mpg</p>
             <p v-if="uploadError" class="upload__error">{{ uploadError.message }}</p>
           </div>
 
@@ -707,7 +707,7 @@ watch(objectUrl, () => { result.value = null })
       ref="fileInput"
       class="upload__file"
       type="file"
-      accept="video/mp4,video/x-msvideo,video/quicktime,video/x-matroska,video/*"
+      accept="video/mp4,video/x-msvideo,video/quicktime,video/x-matroska,video/mpeg,.mpg,.mpeg,video/*"
       @change="onFilePicked"
     />
   </main>
