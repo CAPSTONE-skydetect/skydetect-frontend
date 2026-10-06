@@ -60,6 +60,23 @@ export function addHistory(entry) {
   return record
 }
 
+/**
+ * 기록에 남길 판단 근거 필드. 결과 화면(DecisionEvidence)이 읽는 이름 그대로 둔다.
+ * 수치 몇 개라 localStorage 용량에는 거의 영향이 없다.
+ */
+export function evidenceOf(analysis) {
+  return {
+    decisionScore: analysis.decisionScore ?? null,
+    baseDroneProba: analysis.baseDroneProba ?? null,
+    featureContributions: analysis.featureContributions || null,
+    featureValues: analysis.featureValues || null,
+    windowScores: analysis.windowScores || null,
+    windowStartsS: analysis.windowStartsS || null,
+    windowRejections: analysis.windowRejections || null,
+    trackStartS: analysis.trackStartS ?? null,
+  }
+}
+
 export function removeHistory(id) {
   persist(listHistory().filter((entry) => entry.id !== id))
 }

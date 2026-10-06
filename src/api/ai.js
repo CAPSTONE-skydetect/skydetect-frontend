@@ -150,6 +150,14 @@ export function pointsFromHistory(track) {
   }))
 }
 
+/** 궤적 첫 관측의 영상 시각(초). 판단 근거의 창 시각을 영상 기준으로 보여줄 때 쓴다. */
+export function trackStartSeconds(track) {
+  const first = track?.history?.[0]
+  if (!first) return null
+  if (Number.isFinite(first.timestamp_ms)) return first.timestamp_ms / 1000
+  return null
+}
+
 /**
  * AI 의 PredictionResult 를 화면이 쓰는 모양으로 맞춘다.
  *
@@ -159,8 +167,12 @@ export function pointsFromHistory(track) {
  * 화면은 model 을 보고 표시 방식을 고른다.
  *
  * @param {string} [model]  응답의 model 필드. 없으면 RF 로 본다 (이전 서버 호환)
+ * @param {object} [featureValues]  응답의 features.values (RF 판단 근거에 값으로 표시)
+ * @param {number} [trackStartS]  궤적 첫 관측의 영상 시각(초). MiniRocket 창 시각을 영상 기준으로 바꾼다
  */
-export function toAnalysisDto(prediction, { analysisId, clipId, elapsedMs, model = 'rf' } = {}) {
+export function toAnalysisDto(prediction, {
+  analysisId, clipId, elapsedMs, model = 'rf', featureValues = null, trackStartS = null,
+} = {}) {
   if (!prediction) return null
 
   const quality = prediction.quality
@@ -177,6 +189,14 @@ export function toAnalysisDto(prediction, { analysisId, clipId, elapsedMs, model
     modelVersion: prediction.model_version ?? null,
     rejectReason: prediction.rule_filter?.reject_reason ?? prediction.abstain_reason ?? null,
     rejectDetail: prediction.abstain_detail ?? null,
+    // 판단 근거 (DecisionEvidence.vue)
+    baseDroneProba: prediction.base_drone_proba ?? null,
+    featureContributions: prediction.feature_contributions || null,
+    featureValues,
+    windowScores: prediction.window_scores || null,
+    windowStartsS: prediction.window_starts_s || null,
+    windowRejections: prediction.window_rejections || null,
+    trackStartS,
     // AI 의 processing_time_ms 는 분류기 내부 시간(수십 ms)이라 운영자가 기다린
     // 시간과 다르다. 추적/특징추출이 대부분을 차지한다. 화면의 "처리"는 실제
     // 대기 시간을 뜻하므로 왕복 시간을 쓴다.
@@ -251,11 +271,13 @@ async function run(analysisId, clipId, payload, videoUrl) {
       tuning: DEFAULT_TUNING,
     }, base)
 
+    const track = tracked.tracks?.[0] || null
     const dto = toAnalysisDto(tracked.prediction, {
       analysisId, clipId, elapsedMs: Date.now() - startedAt,
       model: tracked.model || requestedModel,
+      featureValues: tracked.features?.values || null,
+      trackStartS: trackStartSeconds(track),
     })
-    const track = tracked.tracks?.[0] || null
     // overlay.mp4 는 OpenCV 'mp4v' 라 브라우저가 못 읽는다. 화면은 궤적을 받아
     // 캔버스로 직접 그린다. url 은 다운로드용으로만 둔다.
     const points = await fetchTrajectory(
