@@ -21,6 +21,7 @@ import TrackingTuning from './TrackingTuning.vue'
 import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory } from '../lib/historyStore.js'
+import { aiModel, aiBase } from '../lib/aiModel.js'
 import {
   uploadVideo, runManualTracking, toAnalysisDto, toProxiedUrl,
   fetchTrajectory, pointsFromHistory, DEFAULT_TUNING,
@@ -34,7 +35,8 @@ const fileInput = ref(null)
 const videoEl = ref(null)
 const objectUrl = ref(null)
 const fileName = ref('')
-const uploaded = ref(null)      // AI 가 돌려준 { source_video_id, video_path, metadata }
+const uploaded = ref(null)      // AI 가 돌려준 { source_video_id, video_path, metadata } + 올린 서버 model
+let pickedFile = null           // 판정 모델을 바꾸면 그 서버에 다시 올려야 해서 들고 있는다
 const uploading = ref(false)
 const uploadError = ref(null)
 
@@ -80,7 +82,9 @@ async function onFilePicked(event) {
   try {
     // AI 는 서버 안의 파일 경로로만 작업하므로 먼저 올려야 한다.
     // 화면 재생은 올린 파일을 그대로 쓴다. 서버에서 다시 받아올 이유가 없다.
-    uploaded.value = await uploadVideo(file)
+    pickedFile = file
+    const model = aiModel.value
+    uploaded.value = { ...(await uploadVideo(file, undefined, aiBase(model))), model }
   } catch (error) {
     uploadError.value = error
   } finally {
@@ -92,6 +96,7 @@ function reset() {
   if (objectUrl.value) URL.revokeObjectURL(objectUrl.value)
   objectUrl.value = null
   uploaded.value = null
+  pickedFile = null
   uploadError.value = null
   clearSelection()
   frameIndex.value = 0
@@ -269,11 +274,22 @@ async function run() {
   lastRequest.value = request
 
   try {
-    const response = await runManualTracking(request)
+    // 영상 경로는 올린 서버 기준이다. 업로드 뒤에 판정 모델을 바꿨으면 그 서버에 다시 올린다.
+    const model = aiModel.value
+    const base = aiBase(model)
+    if (uploaded.value.model !== model && pickedFile) {
+      uploaded.value = { ...(await uploadVideo(pickedFile, undefined, base)), model }
+      request.sourceVideoId = uploaded.value.source_video_id
+      request.videoPath = uploaded.value.video_path
+    }
+
+    const response = await runManualTracking(request, base)
 
     const elapsedMs = Date.now() - startedAt
-    const analysis = toAnalysisDto(response.prediction, { elapsedMs })
-    const urls = mapUrls(response.download_urls)
+    const analysis = toAnalysisDto(response.prediction, {
+      elapsedMs, model: response.model || model,
+    })
+    const urls = mapUrls(response.download_urls, base)
     const track = response.tracks?.[0] || null
 
     // 화면에 겹쳐 그릴 좌표는 궤적 CSV 의 raw 값을 쓴다.
@@ -297,8 +313,10 @@ async function run() {
       addHistory({
         source: 'upload',
         title: fileName.value,
+        model: analysis.model,
         label: analysis.label,
         confidence: analysis.confidence,
+        decisionScore: analysis.decisionScore,
         rejectReason: analysis.rejectReason,
         featureReasons: response.features?.reasons || null,
         bbox,
@@ -320,13 +338,13 @@ async function run() {
   }
 }
 
-function mapUrls(downloadUrls = {}) {
+function mapUrls(downloadUrls = {}, base) {
   return {
-    overlay: toProxiedUrl(downloadUrls.overlay),
-    trackSequence: toProxiedUrl(downloadUrls.track_sequence),
-    trajectory: toProxiedUrl(downloadUrls.trajectory),
-    metrics: toProxiedUrl(downloadUrls.metrics),
-    foregroundMask: toProxiedUrl(downloadUrls.foreground_mask),
+    overlay: toProxiedUrl(downloadUrls.overlay, base),
+    trackSequence: toProxiedUrl(downloadUrls.track_sequence, base),
+    trajectory: toProxiedUrl(downloadUrls.trajectory, base),
+    metrics: toProxiedUrl(downloadUrls.metrics, base),
+    foregroundMask: toProxiedUrl(downloadUrls.foreground_mask, base),
   }
 }
 

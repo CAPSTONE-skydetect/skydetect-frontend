@@ -8,6 +8,7 @@
  */
 import { ref, computed, onMounted } from 'vue'
 import { listHistory, removeHistory, clearHistory } from '../lib/historyStore.js'
+import { modelLabel } from '../lib/aiModel.js'
 
 const entries = ref([])
 const selectedId = ref(null)
@@ -25,6 +26,10 @@ const REJECT_REASON = {
   feature_error: '피처 계산에 실패했습니다.',
   high_noise: '추적이 불안정합니다 (결측·지터 과다). 대비가 뚜렷한 구간을 다시 지정해 주세요.',
   low_confidence: '관측 신뢰도가 낮습니다. ROI를 대상에 더 정확히 맞춰 주세요.',
+  // MiniRocket 보류 사유 (abstain_reason)
+  invalid_input: '입력 궤적이 모델 계약에 맞지 않습니다 (보정 좌표·FPS 등).',
+  insufficient_observation: '2초 분석 창을 만들 만큼 관측이 없습니다. 더 긴 구간을 지정해 주세요.',
+  low_separation: '새와 드론 점수 차이가 작아 판정을 보류했습니다.',
 }
 
 const FEATURE_REASON = {
@@ -90,6 +95,12 @@ function timeOf(value) {
 
 function confidenceOf(entry) {
   if (entry.label === 'uncertain') return '점수 없음'
+  // MiniRocket 은 확률이 아니라 margin 이라 %로 바꾸지 않는다.
+  if (entry.model === 'minirocket') {
+    const score = entry.decisionScore
+    if (score == null) return '-'
+    return 'margin ' + (score > 0 ? '+' : '') + score.toFixed(2)
+  }
   return Math.round((entry.confidence || 0) * 100) + '%'
 }
 
@@ -200,6 +211,8 @@ const tuningRows = computed(() => {
           </p>
 
           <dl class="detail__grid">
+            <dt class="faint">판정 모델</dt>
+            <dd>{{ selected.model ? modelLabel(selected.model) : 'RF' }}</dd>
             <dt class="faint">일시</dt>
             <dd class="mono">{{ timeOf(selected.createdAt) }}</dd>
             <dt class="faint">출처</dt>

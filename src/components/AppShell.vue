@@ -5,9 +5,10 @@
  * 라우터를 쓰지 않으므로 전환은 해시로 한다 (#/live, #/upload, #/history).
  * 라이브러리 없이도 새로고침과 뒤로가기가 동작한다.
  */
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
 import { fetchHealth } from '../api/ai.js'
+import { AI_MODELS, aiModel } from '../lib/aiModel.js'
 
 defineProps({
   view: { type: String, required: true },
@@ -23,18 +24,28 @@ const VIEWS = [
   { key: 'history', label: '검출 기록' },
 ]
 
-/** AI 서버가 떠 있는지. 백엔드는 로그인되어 있다는 것 자체가 살아있다는 증거다. */
+/**
+ * 선택한 판정 모델의 AI 서버가 떠 있는지.
+ * 백엔드는 로그인되어 있다는 것 자체가 살아있다는 증거다.
+ */
 const aiOnline = ref(null)
 let probeTimer = null
 
 async function probeAi() {
+  const model = aiModel.value
   try {
     await fetchHealth()
-    aiOnline.value = true
+    if (model === aiModel.value) aiOnline.value = true
   } catch {
-    aiOnline.value = false
+    if (model === aiModel.value) aiOnline.value = false
   }
 }
+
+// 모델을 바꾸면 그 서버 상태를 바로 다시 본다.
+watch(aiModel, () => {
+  aiOnline.value = null
+  probeAi()
+})
 
 onMounted(() => {
   probeAi()
@@ -60,10 +71,21 @@ onBeforeUnmount(() => clearInterval(probeTimer))
 
       <div class="shell__spacer" />
 
+      <!-- 판정 모델 토글. 다음 분석부터 적용된다. -->
+      <nav class="nav" title="판정 모델 (다음 분석부터 적용)">
+        <button
+          v-for="item in AI_MODELS"
+          :key="item.key"
+          class="nav__item"
+          :class="{ 'nav__item--on': aiModel === item.key }"
+          @click="aiModel = item.key"
+        >{{ item.label }}</button>
+      </nav>
+
       <span
         class="badge"
         :class="{ 'badge--ok': aiOnline === true, 'badge--error': aiOnline === false }"
-        :title="aiOnline ? 'AI 서버 연결됨 (localhost:8000)' : 'AI 서버 응답 없음 (localhost:8000)'"
+        :title="`${AI_MODELS[aiModel].label} AI 서버 ${aiOnline ? '연결됨' : '응답 없음'} (${AI_MODELS[aiModel].base})`"
       >
         <span class="dot" />AI
       </span>

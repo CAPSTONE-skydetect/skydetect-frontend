@@ -71,8 +71,10 @@ watch(() => clip.value?.analysis, (analysis) => {
   addHistory({
     source: 'live',
     title: clip.value.clipId,
+    model: analysis.model || null,
     label: analysis.label,
     confidence: analysis.confidence,
+    decisionScore: analysis.decisionScore ?? null,
     rejectReason: analysis.rejectReason,
     bbox: lastRequestedBbox,
     initFrameIndex: analysis.request?.initFrameIndex ?? frameIndex.value,

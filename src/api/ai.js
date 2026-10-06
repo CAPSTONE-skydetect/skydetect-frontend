@@ -9,7 +9,7 @@
  * AI 는 작업 큐가 없고 한 번의 요청으로 끝까지 처리한다. 13초 1080p 클립이
  * 2분 가까이 걸리므로 타임아웃을 걸지 않는다.
  */
-import { AI_BASE } from './config.js'
+import { aiBase, aiModel } from '../lib/aiModel.js'
 
 /** TrackingTuning 의 pydantic 기본값과 같다. */
 export const DEFAULT_TUNING = {
@@ -20,16 +20,19 @@ export const DEFAULT_TUNING = {
   onlineUpdate: false,
 }
 
-/** AI 가 주는 다운로드 주소는 자기 기준(/api/files?...)이라 프록시 접두어를 붙인다. */
-export function toProxiedUrl(url) {
+/**
+ * AI 가 주는 다운로드 주소는 자기 기준(/api/files?...)이라 프록시 접두어를 붙인다.
+ * 파일은 그 결과를 만든 서버에 있으므로, 결과를 낸 모델의 접두어를 넘긴다.
+ */
+export function toProxiedUrl(url, base = aiBase()) {
   if (!url) return null
   if (url.startsWith('http')) return url
-  return AI_BASE + url
+  return base + url
 }
 
 /** GET /health */
-export async function fetchHealth() {
-  const response = await fetch(`${AI_BASE}/health`, { signal: AbortSignal.timeout(3000) })
+export async function fetchHealth(base = aiBase()) {
+  const response = await fetch(`${base}/health`, { signal: AbortSignal.timeout(3000) })
   if (!response.ok) throw new Error(`AI 서버 응답 ${response.status}`)
   return response.json()
 }
@@ -38,10 +41,10 @@ export async function fetchHealth() {
  * 영상 업로드. AI 는 서버 안의 파일 경로로만 작업하므로 추적 전에 반드시 거친다.
  * @returns {Promise<{source_video_id:string, video_path:string, metadata:object}>}
  */
-export async function uploadVideo(file, filename) {
+export async function uploadVideo(file, filename, base = aiBase()) {
   const form = new FormData()
   form.append('file', file, filename || file.name || 'clip.mp4')
-  return send(`${AI_BASE}/api/videos/upload`, { body: form })
+  return send(`${base}/api/videos/upload`, { body: form })
 }
 
 /**
@@ -56,8 +59,9 @@ export async function uploadVideo(file, filename) {
  * @param {number} p.resizeWidth
  * @param {number|null} p.maxSeconds
  * @param {object} p.tuning  DEFAULT_TUNING 과 같은 모양
+ * @param {string} [base]  업로드한 서버와 같은 접두어여야 한다 (영상 경로가 그 서버 기준)
  */
-export async function runManualTracking(p) {
+export async function runManualTracking(p, base = aiBase()) {
   const payload = {
     source_video_id: p.sourceVideoId,
     video_path: p.videoPath,
@@ -80,7 +84,7 @@ export async function runManualTracking(p) {
   // null 을 넣으면 거부되므로 값이 있을 때만 싣는다.
   if (Number.isFinite(p.maxSeconds) && p.maxSeconds > 0) payload.max_seconds = p.maxSeconds
 
-  return send(`${AI_BASE}/api/tracks/manual`, { json: payload })
+  return send(`${base}/api/tracks/manual`, { json: payload })
 }
 
 /**
@@ -146,8 +150,17 @@ export function pointsFromHistory(track) {
   }))
 }
 
-/** AI 의 PredictionResult 를 화면이 쓰는 모양으로 맞춘다. */
-export function toAnalysisDto(prediction, { analysisId, clipId, elapsedMs } = {}) {
+/**
+ * AI 의 PredictionResult 를 화면이 쓰는 모양으로 맞춘다.
+ *
+ * 모델마다 응답 모양이 다르다.
+ *   RF         confidence(확률) + rule_filter.reject_reason + top_features
+ *   MiniRocket decision_score(Ridge margin, 확률 아님) + abstain_reason + 창별 점수
+ * 화면은 model 을 보고 표시 방식을 고른다.
+ *
+ * @param {string} [model]  응답의 model 필드. 없으면 RF 로 본다 (이전 서버 호환)
+ */
+export function toAnalysisDto(prediction, { analysisId, clipId, elapsedMs, model = 'rf' } = {}) {
   if (!prediction) return null
 
   const quality = prediction.quality
@@ -155,9 +168,15 @@ export function toAnalysisDto(prediction, { analysisId, clipId, elapsedMs } = {}
     analysisId,
     clipId,
     status: 'DONE',
+    model,
     label: prediction.label,
-    confidence: prediction.confidence,
-    rejectReason: prediction.rule_filter?.reject_reason ?? null,
+    confidence: prediction.confidence ?? null,
+    // MiniRocket: 양수면 drone, 음수면 bird 쪽. 크기가 클수록 분리가 뚜렷하다.
+    decisionScore: prediction.decision_score ?? null,
+    windowsUsed: prediction.windows_used ?? null,
+    modelVersion: prediction.model_version ?? null,
+    rejectReason: prediction.rule_filter?.reject_reason ?? prediction.abstain_reason ?? null,
+    rejectDetail: prediction.abstain_detail ?? null,
     // AI 의 processing_time_ms 는 분류기 내부 시간(수십 ms)이라 운영자가 기다린
     // 시간과 다르다. 추적/특징추출이 대부분을 차지한다. 화면의 "처리"는 실제
     // 대기 시간을 뜻하므로 왕복 시간을 쓴다.
@@ -213,11 +232,14 @@ export async function fetchAnalysisHistory() {
 
 async function run(analysisId, clipId, payload, videoUrl) {
   const startedAt = Date.now()
+  // 분석 도중 토글을 바꿔도 업로드한 서버와 같은 서버로 끝까지 보낸다.
+  const base = aiBase()
+  const requestedModel = aiModel.value
   try {
     const videoResponse = await fetch(videoUrl)
     if (!videoResponse.ok) throw new Error(`클립 영상을 읽지 못했습니다 (${videoResponse.status})`)
 
-    const uploaded = await uploadVideo(await videoResponse.blob(), `${clipId}.mp4`)
+    const uploaded = await uploadVideo(await videoResponse.blob(), `${clipId}.mp4`, base)
     const tracked = await runManualTracking({
       sourceVideoId: uploaded.source_video_id,
       videoPath: uploaded.video_path,
@@ -227,16 +249,17 @@ async function run(analysisId, clipId, payload, videoUrl) {
       resizeWidth: 1280,
       maxSeconds: null,
       tuning: DEFAULT_TUNING,
-    })
+    }, base)
 
     const dto = toAnalysisDto(tracked.prediction, {
       analysisId, clipId, elapsedMs: Date.now() - startedAt,
+      model: tracked.model || requestedModel,
     })
     const track = tracked.tracks?.[0] || null
     // overlay.mp4 는 OpenCV 'mp4v' 라 브라우저가 못 읽는다. 화면은 궤적을 받아
     // 캔버스로 직접 그린다. url 은 다운로드용으로만 둔다.
     const points = await fetchTrajectory(
-      toProxiedUrl(tracked.download_urls?.trajectory),
+      toProxiedUrl(tracked.download_urls?.trajectory, base),
       {
         processedWidth: track?.processed_width,
         processedHeight: track?.processed_height,
@@ -247,7 +270,7 @@ async function run(analysisId, clipId, payload, videoUrl) {
       status: 'DONE',
       result: {
         ...dto,
-        overlayUrl: toProxiedUrl(tracked.download_urls?.overlay),
+        overlayUrl: toProxiedUrl(tracked.download_urls?.overlay, base),
         track,
         points: points || pointsFromHistory(track),
         fps: tracked.metadata?.fps || null,
