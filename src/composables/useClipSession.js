@@ -16,7 +16,7 @@
  * 이게 없으면 결과를 읽는 도중 다음 클립이 화면을 덮어버린다.
  */
 import { ref, computed, onScopeDispose } from 'vue'
-import { createClip, fetchClip } from '../api/clips.js'
+import { createClip, fetchClip, listClips } from '../api/clips.js'
 import { createAnalysis, fetchAnalysis } from '../api/analyses.js'
 import { POLL_INTERVAL_MS } from '../api/config.js'
 import { startPolling } from './usePolling.js'
@@ -65,18 +65,20 @@ export function useClipSession() {
    * 검출. 누른 순간 -3초는 이미 서버에 있고 +10초는 아직 미래다.
    * 그래서 응답은 즉시 오지만 클립은 아직 없다 (202 PENDING).
    */
-  async function trigger() {
+  async function trigger(observation = {}) {
     triggering.value = true
     triggerError.value = null
     try {
-      const created = await createClip()
+      const created = await createClip(observation)
 
       const entry = {
         clipId: created.clipId,
         status: created.status,
         readyAt: created.readyAt ? Date.parse(created.readyAt) : null,
-        triggeredAt: Date.now(),
-        meta: null,
+        triggeredAt: created.serverReceivedEpochMs || Date.now(),
+        meta: created.meta || null,
+        timing: created.timing || null,
+        analysisId: created.analysisId || null,
         analysis: null,
         analysisError: null,
         error: null,
@@ -109,7 +111,9 @@ export function useClipSession() {
           status: dto.status,
           readyAt: dto.readyAt ? Date.parse(dto.readyAt) : entry.readyAt,
           meta: dto.status === 'READY' ? dto : entry.meta,
-          error: null,
+          timing: dto.timing || entry.timing,
+          analysisId: dto.analysisId || entry.analysisId,
+          error: dto.error ? { message: dto.error } : null,
         }))
       },
       onError: (error) => {
@@ -119,6 +123,35 @@ export function useClipSession() {
 
     pollers.set(clipId, stop)
   }
+
+  async function restoreServerQueue() {
+    try {
+      const response = await listClips()
+      const rows = response?.clips || []
+      if (!rows.length || clips.value.length) return
+      clips.value = rows.map((row) => ({
+        clipId: row.clipId,
+        status: row.status,
+        readyAt: row.readyAt ? Date.parse(row.readyAt) : null,
+        triggeredAt: row.serverReceivedEpochMs || (row.triggeredAt ? Date.parse(row.triggeredAt) : Date.now()),
+        meta: row.meta || null,
+        timing: row.timing || null,
+        analysisId: row.analysisId || null,
+        analysis: row.analysisId ? { status: 'PENDING', analysisId: row.analysisId } : null,
+        analysisError: null,
+        error: row.error ? { message: row.error } : null,
+      }))
+      if (!selectedClipId.value) selectedClipId.value = rows[0].clipId
+      for (const row of rows) {
+        if (row.status === 'PENDING') watchClip(row.clipId)
+        if (row.analysisId) watchAnalysis(row.clipId, row.analysisId)
+      }
+    } catch {
+      // The live screen remains usable when history service is temporarily down.
+    }
+  }
+
+  void restoreServerQueue()
 
   // --- 분석 -----------------------------------------------------------------
 

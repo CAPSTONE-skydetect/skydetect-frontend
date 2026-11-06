@@ -20,7 +20,12 @@ const { status, error, engine, retry, resume } = useHls(videoEl, source)
 
 async function onTrigger() {
   try {
-    await props.session.trigger()
+    await props.session.trigger({
+      clientClickEpochMs: Date.now(),
+      displayedMediaTimeS: Number.isFinite(videoEl.value?.currentTime)
+        ? videoEl.value.currentTime : null,
+      displayTimeMapping: 'HLS media position only; sensor capture wall-clock mapping unknown',
+    })
   } catch {
     // 에러는 session.triggerError 로 화면에 뜬다.
   }
@@ -75,7 +80,9 @@ async function onTrigger() {
           검출
         </button>
 
-        <span class="dim live__hint">누른 시각 기준 -3초 ~ +10초 구간을 분석</span>
+        <span class="dim live__hint" title="HLS 재생 위치는 기록하지만 센서 촬영시각과 같다고 가정하지 않습니다.">
+          서버 접수 시각 기준 -3초 ~ +10초 저장 · HLS 화면 시각은 별도 기록
+        </span>
 
         <div style="flex: 1" />
 

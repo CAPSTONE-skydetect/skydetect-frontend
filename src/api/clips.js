@@ -14,15 +14,23 @@ import * as mock from './mock/mockBackend.js'
  * 검출 트리거. 서버가 트리거 시각을 정하므로 보낼 본문이 없다.
  * @returns {Promise<{clipId: string, status: 'PENDING', readyAt: string}>} 202
  */
-export function createClip() {
+export function createClip(observation = {}) {
   if (CLIP_SOURCE === 'mock') return mock.createClip()
+  if (CLIP_SOURCE === 'local') return http.post('/local-api/clips', { json: observation })
   return http.post('/api/clips', { json: {} })
 }
 
 /** 클립 상태 조회. PENDING 인 동안 폴링한다. */
 export function fetchClip(clipId) {
   if (CLIP_SOURCE === 'mock') return mock.fetchClip(clipId)
+  if (CLIP_SOURCE === 'local') return http.get(`/local-api/clips/${encodeURIComponent(clipId)}`)
   return http.get(`/api/clips/${encodeURIComponent(clipId)}`)
+}
+
+/** Server-persisted clip records used to restore the queue after a reload. */
+export function listClips() {
+  if (CLIP_SOURCE === 'local') return http.get('/local-api/clips')
+  return Promise.resolve({ clips: [] })
 }
 
 /**

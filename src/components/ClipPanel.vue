@@ -19,6 +19,7 @@ import TrackOverlay from './TrackOverlay.vue'
 import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory, evidenceOf } from '../lib/historyStore.js'
+import { aiModel } from '../lib/aiModel.js'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -27,6 +28,7 @@ const props = defineProps({
 const videoEl = ref(null)
 const sourceBox = ref(null)     // 원본 픽셀 좌표 {x, y, width, height}
 const frameIndex = ref(0)
+const analysisDurationSeconds = ref(13)
 const playing = ref(false)
 const now = ref(Date.now())
 const requestError = ref(null)
@@ -54,6 +56,7 @@ watch(() => clip.value?.clipId, () => {
   playing.value = false
   requestError.value = null
   showOverlay.value = false
+  analysisDurationSeconds.value = Math.min(13, (clip.value?.meta?.durationMs || 13000) / 1000)
 })
 
 /**
@@ -115,7 +118,8 @@ const pendingBarStyle = computed(() => ({ width: (pendingProgress.value * 100).t
 
 // 프레임 조작 ------------------------------------------------------------
 
-const lastFrame = computed(() => Math.max(0, (meta.value?.frameCount || 1) - 1))
+const framePts = computed(() => meta.value?.framePts || null)
+const lastFrame = computed(() => Math.max(0, (framePts.value?.length || meta.value?.frameCount || 1) - 1))
 
 /**
  * 프레임 번호 → 재생 위치.
@@ -130,7 +134,15 @@ function seekToFrame(index) {
   if (!video || !fps) return
   const clamped = Math.min(Math.max(0, index), lastFrame.value)
   frameIndex.value = clamped
-  video.currentTime = (clamped + 0.2) / fps
+  if (framePts.value?.[clamped] !== undefined) {
+    const current = framePts.value[clamped]
+    const next = framePts.value[clamped + 1]
+    const previous = framePts.value[clamped - 1]
+    const step = next !== undefined ? next - current : current - (previous ?? current - 1 / fps)
+    video.currentTime = current + Math.max(0, step) * 0.45
+  } else {
+    video.currentTime = (clamped + 0.2) / fps
+  }
 }
 
 /** videoWidth 는 메타데이터가 로드돼야 채워진다. 그 전에는 0 이다. */
@@ -150,7 +162,20 @@ function onTimeUpdate() {
   const video = videoEl.value
   const fps = meta.value?.fps
   if (!video || !fps) return
-  frameIndex.value = toFrameIndex(video.currentTime, fps, meta.value?.frameCount)
+  if (framePts.value?.length) {
+    let low = 0
+    let high = framePts.value.length - 1
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2)
+      if (framePts.value[mid] < video.currentTime) low = mid + 1
+      else high = mid
+    }
+    const before = Math.max(0, low - 1)
+    frameIndex.value = Math.abs(framePts.value[before] - video.currentTime)
+      <= Math.abs(framePts.value[low] - video.currentTime) ? before : low
+  } else {
+    frameIndex.value = toFrameIndex(video.currentTime, fps, meta.value?.frameCount)
+  }
 }
 
 function togglePlay() {
@@ -176,7 +201,19 @@ function pauseForDrawing() {
 
 // 분석 요청 --------------------------------------------------------------
 
-const canAnalyze = computed(() => state.value === 'CLIP_READY' && !!sourceBox.value)
+const intervalStartSeconds = computed(() => framePts.value?.[frameIndex.value]
+  ?? (meta.value?.fps ? frameIndex.value / meta.value.fps : 0))
+const maxAnalysisSeconds = computed(() => Math.max(0,
+  (meta.value?.durationMs || 0) / 1000 - intervalStartSeconds.value))
+const canAnalyze = computed(() => state.value === 'CLIP_READY' && !!sourceBox.value
+  && analysisDurationSeconds.value > 0
+  && analysisDurationSeconds.value <= maxAnalysisSeconds.value + 0.01)
+
+watch([intervalStartSeconds, maxAnalysisSeconds], () => {
+  if (maxAnalysisSeconds.value > 0 && analysisDurationSeconds.value > maxAnalysisSeconds.value) {
+    analysisDurationSeconds.value = Math.floor(maxAnalysisSeconds.value * 100) / 100
+  }
+})
 
 async function requestAnalysis() {
   if (!canAnalyze.value) return
@@ -192,6 +229,7 @@ async function requestAnalysis() {
       Math.round(box.width),
       Math.round(box.height),
     ],
+    maxSeconds: Number(analysisDurationSeconds.value.toFixed(2)),
   }
 
   lastRequestedBbox = payload.targetBbox
@@ -200,6 +238,8 @@ async function requestAnalysis() {
     // videoUrl 은 AI 직결 경로에서만 쓴다 (클립 영상을 AI 에 업로드해야 한다).
     await props.session.requestAnalysis(clip.value.clipId, payload, {
       videoUrl: meta.value?.videoUrl,
+      localClip: /^clip_[0-9a-f]{32}$/.test(clip.value.clipId),
+      model: aiModel.value,
     })
   } catch (error) {
     requestError.value = error
@@ -260,7 +300,7 @@ const scaleLabel = computed(() => {
 const timeLabel = computed(() => {
   const fps = meta.value?.fps
   if (!fps) return ''
-  return (frameIndex.value / fps).toFixed(2) + 's'
+  return (framePts.value?.[frameIndex.value] ?? (frameIndex.value / fps)).toFixed(3) + 's'
 })
 </script>
 
@@ -376,6 +416,9 @@ const timeLabel = computed(() => {
         <div class="clip__coords">
           <span class="faint mono">{{ scaleLabel }}</span>
           <div style="flex: 1" />
+          <span v-if="clip?.timing" class="faint clip__timing">
+            기준: 서버 접수 시각 · HLS/센서 시계 대응 미확인
+          </span>
           <span v-if="sourceBox" class="mono clip__bbox">
             bbox [{{ Math.round(sourceBox.x) }}, {{ Math.round(sourceBox.y) }},
             {{ Math.round(sourceBox.width) }}, {{ Math.round(sourceBox.height) }}]
@@ -385,6 +428,16 @@ const timeLabel = computed(() => {
 
         <div class="clip__actions">
           <template v-if="state === 'CLIP_READY'">
+            <label class="clip__interval">
+              분석 길이
+              <input
+                v-model.number="analysisDurationSeconds"
+                type="number" min="0.1" step="0.1"
+                :max="maxAnalysisSeconds.toFixed(2)"
+              /> 초
+              <span class="faint">frame {{ frameIndex }} ({{ timeLabel }})부터
+                {{ (intervalStartSeconds + analysisDurationSeconds).toFixed(2) }}s까지</span>
+            </label>
             <button class="clip__primary" :disabled="!canAnalyze" @click="requestAnalysis">
               분석 요청
             </button>
@@ -404,6 +457,12 @@ const timeLabel = computed(() => {
             <button @click="showOverlay = !showOverlay">
               {{ showOverlay ? '지정 박스 보기' : '추적 오버레이 보기' }}
             </button>
+            <a v-if="clip.analysis.trackSequenceUrl" :href="clip.analysis.trackSequenceUrl" download>
+              TrackSequence 다운로드
+            </a>
+            <a v-if="clip.analysis.overlayUrl" :href="clip.analysis.overlayUrl" download>
+              오버레이 다운로드
+            </a>
           </template>
 
           <template v-else-if="state === 'ANALYSIS_FAILED'">
@@ -414,6 +473,9 @@ const timeLabel = computed(() => {
           </template>
         </div>
 
+        <p v-if="state === 'CLIP_READY' || state === 'DONE'" class="faint">
+          새·드론의 비행 영역을 선택해 주세요. 분류 모델은 배경이나 다른 사물인지 확인하지 않습니다.
+        </p>
         <AnalysisResult v-if="state === 'DONE'" :analysis="clip.analysis" @redraw="redraw" />
       </template>
     </div>
@@ -422,6 +484,9 @@ const timeLabel = computed(() => {
 
 <style scoped>
 .clip__id { font-size: 11px; }
+.clip__timing { font-size: 11px; }
+.clip__interval { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.clip__interval input { width: 76px; }
 .clip__close {
   padding: 2px 8px;
   border-color: transparent;

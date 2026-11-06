@@ -9,6 +9,7 @@
  */
 import { ref, watch, onBeforeUnmount } from 'vue'
 import Hls from 'hls.js'
+import { LIVE_HLS_CONFIG } from './liveHlsConfig.js'
 
 /**
  * @param {import('vue').Ref<HTMLVideoElement|null>} videoRef
@@ -66,15 +67,7 @@ export function useHls(videoRef, sourceRef) {
     }
 
     engine.value = 'hls.js'
-    hls = new Hls({
-      // 관제 화면이므로 지연을 짧게 유지한다. 뒤처지면 라이브 엣지로 따라붙는다.
-      lowLatencyMode: true,
-      liveSyncDurationCount: 3,
-      // 끊겼을 때 자동 재시도
-      manifestLoadingMaxRetry: 6,
-      levelLoadingMaxRetry: 6,
-      fragLoadingMaxRetry: 6,
-    })
+    hls = new Hls({ ...LIVE_HLS_CONFIG })
 
     hls.on(Hls.Events.MANIFEST_PARSED, tryPlay)
 
