@@ -431,6 +431,9 @@ const timeLabel = computed(() => {
         </div>
 
         <div class="clip__actions">
+          <p v-if="clip?.timing?.shortenedByGap" class="clip__error-text">
+            원본 영상이 끊겨 연속 구간 {{ (meta.durationMs / 1000).toFixed(1) }}초만 저장했어요.
+          </p>
           <template v-if="state === 'CLIP_READY'">
             <TrackerProfileSelect v-model="trackerVariant" />
             <label class="clip__interval">
