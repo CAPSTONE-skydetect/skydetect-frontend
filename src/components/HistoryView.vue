@@ -9,6 +9,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { listHistory, removeHistory, clearHistory } from '../lib/historyStore.js'
 import { modelLabel } from '../lib/aiModel.js'
+import { trackerLabel } from '../lib/trackerProfiles.js'
 import DecisionEvidence from './DecisionEvidence.vue'
 
 const entries = ref([])
@@ -112,6 +113,7 @@ const tuningRows = computed(() => {
   const t = selected.value?.tuning
   if (!t) return []
   return [
+    ['추적 방식', trackerLabel(t.trackerVariant)],
     ['유지 conf', t.kltAcceptConf],
     ['재탐색 conf', t.recoveryConf],
     ['학습 conf', t.updateConf],

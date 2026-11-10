@@ -20,6 +20,8 @@ import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory, evidenceOf } from '../lib/historyStore.js'
 import { aiModel } from '../lib/aiModel.js'
+import TrackerProfileSelect from './TrackerProfileSelect.vue'
+import { trackerLabel } from '../lib/trackerProfiles.js'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -29,6 +31,7 @@ const videoEl = ref(null)
 const sourceBox = ref(null)     // 원본 픽셀 좌표 {x, y, width, height}
 const frameIndex = ref(0)
 const analysisDurationSeconds = ref(13)
+const trackerVariant = ref('d0')
 const playing = ref(false)
 const now = ref(Date.now())
 const requestError = ref(null)
@@ -85,7 +88,7 @@ watch(() => clip.value?.analysis, (analysis) => {
     topFeatures: analysis.topFeatures || null,
     ...evidenceOf(analysis),
     metrics: null,
-    tuning: null,
+    tuning: { trackerVariant: analysis.request?.trackerVariant ?? 'd0' },
     processingTimeMs: analysis.processingTimeMs,
     thumbnail: captureThumbnail(videoEl.value, { box: sourceBox.value }),
     overlayUrl: analysis.overlayUrl || null,
@@ -230,6 +233,7 @@ async function requestAnalysis() {
       Math.round(box.height),
     ],
     maxSeconds: Number(analysisDurationSeconds.value.toFixed(2)),
+    trackerVariant: trackerVariant.value,
   }
 
   lastRequestedBbox = payload.targetBbox
@@ -428,6 +432,7 @@ const timeLabel = computed(() => {
 
         <div class="clip__actions">
           <template v-if="state === 'CLIP_READY'">
+            <TrackerProfileSelect v-model="trackerVariant" />
             <label class="clip__interval">
               분석 길이
               <input
@@ -477,6 +482,7 @@ const timeLabel = computed(() => {
           새·드론의 비행 영역을 선택해 주세요. 분류 모델은 배경이나 다른 사물인지 확인하지 않습니다.
         </p>
         <AnalysisResult v-if="state === 'DONE'" :analysis="clip.analysis" @redraw="redraw" />
+        <p v-if="state === 'DONE'" class="faint">사용한 추적 방식: {{ trackerLabel(clip.analysis?.request?.trackerVariant) }}</p>
       </template>
     </div>
   </section>

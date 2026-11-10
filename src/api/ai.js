@@ -10,9 +10,11 @@
  * 2분 가까이 걸리므로 타임아웃을 걸지 않는다.
  */
 import { aiBase, aiModel } from '../lib/aiModel.js'
+import { serializeTrackingTuning } from '../lib/trackerProfiles.js'
 
 /** TrackingTuning 의 pydantic 기본값과 같다. */
 export const DEFAULT_TUNING = {
+  trackerVariant: 'd0',
   kltAcceptConf: 0.40,
   recoveryConf: 0.58,
   updateConf: 0.76,
@@ -72,13 +74,7 @@ export async function runManualTracking(p, base = aiBase()) {
     stabilize: p.stabilize,
     resize_width: p.resizeWidth,
     write_overlay: true,
-    tuning: {
-      klt_accept_conf: p.tuning.kltAcceptConf,
-      recovery_conf: p.tuning.recoveryConf,
-      update_conf: p.tuning.updateConf,
-      search_radius_multiplier: p.tuning.searchRadius,
-      online_update_enabled: p.tuning.onlineUpdate,
-    },
+    tuning: serializeTrackingTuning(p.tuning),
   }
   // ManualTrackingRequest 는 extra="forbid" 이고 max_seconds 는 gt=0 이다.
   // null 을 넣으면 거부되므로 값이 있을 때만 싣는다.
@@ -268,7 +264,7 @@ async function run(analysisId, clipId, payload, videoUrl) {
       stabilize: true,
       resizeWidth: 1280,
       maxSeconds: payload.maxSeconds ?? null,
-      tuning: DEFAULT_TUNING,
+      tuning: { ...DEFAULT_TUNING, trackerVariant: payload.trackerVariant ?? 'd0' },
     }, base)
 
     const track = tracked.tracks?.[0] || null
@@ -292,6 +288,8 @@ async function run(analysisId, clipId, payload, videoUrl) {
       status: 'DONE',
       result: {
         ...dto,
+        request: { ...payload },
+        trackerVariant: tracked.metadata?.tracker_variant ?? payload.trackerVariant ?? 'd0',
         overlayUrl: toProxiedUrl(tracked.download_urls?.overlay, base),
         trackSequenceUrl: toProxiedUrl(tracked.download_urls?.track_sequence, base),
         track,
