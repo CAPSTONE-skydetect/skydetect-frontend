@@ -11,7 +11,7 @@ function pick(value, allowed, fallback) {
  * local은 이 독립 Pi 실험의 인증된 로컬 브리지를 사용한다.
  */
 export const CLIP_SOURCE = pick(
-  import.meta.env.VITE_CLIP_SOURCE, ['mock', 'backend', 'local'], 'mock',
+  import.meta.env.VITE_CLIP_SOURCE, ['mock', 'backend', 'local', 'spring-pi'], 'mock',
 )
 
 /**

@@ -110,7 +110,7 @@ export function useClipSession() {
           ...entry,
           status: dto.status,
           readyAt: dto.readyAt ? Date.parse(dto.readyAt) : entry.readyAt,
-          meta: dto.status === 'READY' ? dto : entry.meta,
+          meta: dto.status === 'READY' ? (dto.meta || dto) : entry.meta,
           timing: dto.timing || entry.timing,
           analysisId: dto.analysisId || entry.analysisId,
           error: dto.error ? { message: dto.error } : null,

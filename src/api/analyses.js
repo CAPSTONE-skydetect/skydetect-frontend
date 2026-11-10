@@ -75,7 +75,7 @@ export async function fetchAnalysis(analysisId) {
 
 /** 분석 이력 목록. */
 export function fetchAnalysisHistory() {
-  if (CLIP_SOURCE === 'local') return http.get('/local-api/analyses')
+  if (CLIP_SOURCE === 'local' || CLIP_SOURCE === 'spring-pi') return http.get('/local-api/analyses')
   if (ANALYSIS_SOURCE === 'mock') return mock.fetchAnalysisHistory()
   if (ANALYSIS_SOURCE === 'ai') return ai.fetchAnalysisHistory()
   return http.get('/api/analyses')

@@ -267,7 +267,7 @@ async function run(analysisId, clipId, payload, videoUrl) {
       targetBbox: payload.targetBbox,
       stabilize: true,
       resizeWidth: 1280,
-      maxSeconds: null,
+      maxSeconds: payload.maxSeconds ?? null,
       tuning: DEFAULT_TUNING,
     }, base)
 
@@ -293,6 +293,7 @@ async function run(analysisId, clipId, payload, videoUrl) {
       result: {
         ...dto,
         overlayUrl: toProxiedUrl(tracked.download_urls?.overlay, base),
+        trackSequenceUrl: toProxiedUrl(tracked.download_urls?.track_sequence, base),
         track,
         points: points || pointsFromHistory(track),
         fps: tracked.metadata?.fps || null,
