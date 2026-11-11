@@ -52,9 +52,9 @@ const isDefault = computed(() =>
 <template>
   <div class="tuning" :class="[`tuning--${layout}`, { 'tuning--disabled': disabled }]">
     <div class="tuning__head">
-      <span class="tuning__title">추적 설정</span>
+      <span class="eyebrow">추적 설정</span>
       <div style="flex: 1" />
-      <button class="tuning__reset" type="button" :disabled="disabled || isDefault" @click="reset">
+      <button class="btn-ghost btn-sm" type="button" :disabled="disabled || isDefault" @click="reset">
         기본값
       </button>
     </div>
@@ -85,6 +85,7 @@ const isDefault = computed(() =>
       </label>
     </div>
 
+    <div class="tuning__checks">
     <label class="tuning__check">
       <input
         type="checkbox"
@@ -107,6 +108,7 @@ const isDefault = computed(() =>
         <small class="faint">OFF면 처음 지정한 외형을 고정합니다.</small>
       </span>
     </label>
+    </div>
 
     <label class="range">
       <span class="range__label">
@@ -136,7 +138,7 @@ const isDefault = computed(() =>
       <small class="faint">낮추면 재포착이 쉬워지지만 오탐 위험이 커집니다.</small>
     </label>
 
-    <label class="range" :class="{ 'range--off': !updateConfActive }">
+    <label class="range range--update" :class="{ 'range--off': !updateConfActive }">
       <span class="range__label">
         <b>학습 conf</b>
         <output class="mono">{{ tuning.updateConf.toFixed(2) }}</output>
@@ -171,28 +173,28 @@ const isDefault = computed(() =>
 </template>
 
 <style scoped>
-.tuning { padding: 14px; }
+.tuning { padding: 14px; border-top: 1px solid var(--border); }
 .tuning--disabled { opacity: 0.55; }
 
 .tuning__fields { display: flex; flex-direction: column; gap: 14px; }
 
-/* 화면 아래 가로 바. 항목을 여러 열로 펼쳐 세로 높이를 줄인다. */
+/* 화면 아래 가로 바. 3열 격자로 줄을 맞춘다.
+   1행: 추적 시간 / 처리 해상도 / 체크 2개
+   2행: 유지 / 재탐색 / 검색 반경
+   3행: 학습
+   학습 conf 는 마크업에서 검색 반경보다 앞에 있어서 order 로 한 칸 뒤로 보낸다. */
 .tuning--row .tuning__fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 12px 20px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
   align-items: start;
 }
-.tuning--row .tuning__row { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tuning--row .tuning__row { grid-column: 1 / span 2; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.tuning--row .range--update { order: 1; }
+
+.tuning__checks { display: flex; flex-direction: column; gap: 12px; }
 
 .tuning__head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.tuning__title { font-weight: 600; font-size: 13px; }
-.tuning__reset {
-  padding: 3px 10px;
-  font-size: 11px;
-  background: transparent;
-  border-color: var(--border);
-}
 
 .tuning__row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
@@ -206,8 +208,8 @@ const isDefault = computed(() =>
 }
 .tuning__check input { width: auto; margin-top: 2px; accent-color: var(--accent); }
 .tuning__check span { display: flex; flex-direction: column; gap: 2px; }
-.tuning__check em { font-style: normal; font-size: 11px; color: var(--accent); }
-.tuning__check small, .range small { font-size: 11px; line-height: 1.4; }
+.tuning__check em { font-style: normal; font-size: 12px; color: var(--accent); }
+.tuning__check small, .range small { font-size: 12px; line-height: 1.4; }
 
 .range { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
 .range--off { opacity: 0.5; }

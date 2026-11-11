@@ -6,7 +6,7 @@
  * 오른쪽에서 클립을 기다리든 분석이 돌든 왼쪽은 계속 흐르고 검출 버튼도 계속
  * 눌려야 한다. 그래서 버튼의 disabled 는 요청을 보내는 순간에만 걸린다.
  */
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed } from 'vue'
 import { useHls } from '../composables/useHls.js'
 import { useWebRtc } from '../composables/useWebRtc.js'
 import { HLS_URL, WHEP_URL } from '../api/config.js'
@@ -17,8 +17,8 @@ const props = defineProps({
 
 const videoEl = ref(null)
 const source = ref(HLS_URL)
-const transport = ref(WHEP_URL ? 'webrtc' : 'hls')
-const isWebRtc = computed(() => transport.value === 'webrtc')
+const transport = WHEP_URL ? 'webrtc' : 'hls'
+const isWebRtc = computed(() => transport === 'webrtc')
 const hls = useHls(videoEl, source, computed(() => !isWebRtc.value))
 const rtc = useWebRtc(videoEl, WHEP_URL, isWebRtc)
 const status = computed(() => (isWebRtc.value ? rtc : hls).status.value)
@@ -28,22 +28,6 @@ const { fastMode, liveDelay, stalls, goLive, toggleFastMode } = hls
 const rtcStats = rtc.stats
 const retry = () => (isWebRtc.value ? rtc : hls).retry()
 const resume = () => (isWebRtc.value ? rtc : hls).resume()
-const showClock = ref(false)
-const clockText = ref('')
-let clockTimer = null
-function toggleClock() {
-  showClock.value = !showClock.value
-  clearInterval(clockTimer)
-  if (showClock.value) {
-    const tick = () => {
-      const now = new Date()
-      clockText.value = now.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(now.getMilliseconds()).padStart(3, '0')
-    }
-    tick()
-    clockTimer = setInterval(tick, 50)
-  }
-}
-onBeforeUnmount(() => clearInterval(clockTimer))
 
 async function onTrigger() {
   try {
@@ -82,9 +66,8 @@ async function onTrigger() {
         재생 지연 {{ liveDelay === null ? '측정 대기' : `${liveDelay.toFixed(2)}초` }} · 버퍼 멈춤 {{ stalls }}회
       </span>
       <span v-else class="faint live__engine">
-        {{ rtcStats ? `${rtcStats.width || '?'}×${rtcStats.height || '?'} · ${rtcStats.fps || 0}fps` : 'WebRTC 수신 대기' }} · 실제 지연은 시계로 측정
+        {{ rtcStats ? `${rtcStats.width || '?'}×${rtcStats.height || '?'} · ${rtcStats.fps || 0}fps` : 'WebRTC 수신 대기' }}
       </span>
-      <button v-if="WHEP_URL" @click="transport = isWebRtc ? 'hls' : 'webrtc'">{{ isWebRtc ? 'HLS로 전환' : 'WebRTC로 전환' }}</button>
       <button v-if="engine === 'hls.js'" :aria-pressed="fastMode" @click="toggleFastMode"
         title="저지연은 목표 버퍼 0.8초, 안정 모드는 1.2초입니다. 저지연에서 끊기면 안정 모드로 복귀하세요.">
         {{ fastMode ? '저지연 모드' : '안정 모드' }}
@@ -94,13 +77,15 @@ async function onTrigger() {
     </div>
 
     <div class="panel__body">
-      <div v-if="showClock" class="live__clock">
-        <strong>{{ clockText }}</strong>
-        <span>카메라로 이 시계를 촬영하세요. 현재 시각과 영상 속 시각의 차이가 실제 화면 지연입니다. (50ms 갱신)</span>
-      </div>
       <div class="live__stage">
         <!-- muted 가 없으면 브라우저 자동재생 정책에 막힌다. 관제 영상에 소리는 필요 없다. -->
         <video ref="videoEl" class="live__video" muted playsinline loop autoplay />
+
+        <!-- 화면 모서리 표식. 영상 영역이 어디까지인지 어두운 하늘에서도 보이게 한다. -->
+        <i class="live__corner live__corner--tl" />
+        <i class="live__corner live__corner--tr" />
+        <i class="live__corner live__corner--bl" />
+        <i class="live__corner live__corner--br" />
 
         <!-- 멈춤과 고장을 구분한다. 탭을 백그라운드로 보내면 브라우저가 무음 영상을
              절전 정지시키는데, 그걸 스트림 오류로 그리면 멀쩡한 서버를 의심하게 된다. -->
@@ -118,17 +103,12 @@ async function onTrigger() {
 
       <div class="live__controls">
         <button class="live__trigger" :disabled="session.triggering.value" @click="onTrigger">
-          <span v-if="session.triggering.value" class="spinner" />
+          <span v-if="session.triggering.value" class="spinner live__spinner" />
           <span v-else class="live__trigger-dot" />
           검출
         </button>
 
-        <span class="dim live__hint" title="미리보기 재생 위치는 센서 촬영시각과 같다고 가정하지 않습니다.">
-          서버 접수 시각 기준 -3초 ~ +10초 저장 · 미리보기와 녹화 경로 분리
-        </span>
-
         <div style="flex: 1" />
-        <button @click="toggleClock">{{ showClock ? '측정 시계 닫기' : '지연 측정 시계' }}</button>
 
         <span v-if="session.pendingCount.value > 0" class="badge badge--warn">
           <span class="dot dot--pulse" />저장 중 {{ session.pendingCount.value }}건
@@ -144,14 +124,11 @@ async function onTrigger() {
 
 <style scoped>
 .panel__head, .live__controls { flex-wrap: wrap; }
-.live__clock { flex: none; padding: 12px; background: #fff; color: #111; text-align: center; }
-.live__clock strong { display: block; font: bold clamp(24px, 4vw, 54px) monospace; font-variant-numeric: tabular-nums; }
-.live__clock span { display: block; font-size: 12px; }
 .live__stage {
   position: relative;
   flex: 1;
   min-height: 0;
-  background: #05080c;
+  background: var(--bg-video);
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -162,6 +139,18 @@ async function onTrigger() {
   object-fit: contain;
   display: block;
 }
+.live__corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 0 solid rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+.live__corner--tl { top: 10px; left: 10px; border-top-width: 1px; border-left-width: 1px; }
+.live__corner--tr { top: 10px; right: 10px; border-top-width: 1px; border-right-width: 1px; }
+.live__corner--bl { bottom: 10px; left: 10px; border-bottom-width: 1px; border-left-width: 1px; }
+.live__corner--br { bottom: 10px; right: 10px; border-bottom-width: 1px; border-right-width: 1px; }
+
 .live__overlay {
   position: absolute;
   inset: 0;
@@ -170,44 +159,48 @@ async function onTrigger() {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  background: #05080ccc;
+  background: rgba(7, 7, 8, 0.85);
   text-align: center;
   padding: 20px;
 }
 .live__overlay p { margin: 0; }
 .live__src { font-size: 12px; word-break: break-all; }
-.live__engine { font-size: 11px; }
+.live__engine { font-size: 12px; }
 
 .live__controls {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
   padding: 12px 14px;
   border-top: 1px solid var(--border);
 }
+
+/* 이 화면의 유일한 주 행동. 강조색을 통째로 쓴다. */
 .live__trigger {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+  height: 40px;
+  padding: 0 22px;
+  gap: 10px;
+  font-size: 14px;
   font-weight: 700;
-  padding: 11px 22px;
-  background: #7f1d1d;
-  border-color: #b91c1c;
-  white-space: nowrap;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
 }
-.live__trigger:hover:not(:disabled) { background: #991b1b; border-color: #ef4444; }
+.live__trigger:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 .live__trigger-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: #fca5a5;
-  box-shadow: 0 0 0 3px #fca5a533;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--on-accent);
 }
-.live__hint { font-size: 12px; }
+.live__spinner { border-color: rgba(0, 0, 0, 0.25); border-top-color: var(--on-accent); }
+
 .live__error {
   margin: 0;
   padding: 10px 14px;
   color: var(--danger);
-  font-size: 13px;
+  font-size: 12px;
   border-top: 1px solid var(--border);
 }
 </style>

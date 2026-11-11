@@ -14,7 +14,9 @@
  *   - 궤적 전체를 미리 그려 어디로 지나갔는지 한눈에 보인다
  */
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import Icon from './Icon.vue'
 import TrackOverlay from './TrackOverlay.vue'
+import RadarEmpty from './RadarEmpty.vue'
 import { toFrameIndex } from '../lib/videoGeometry.js'
 
 const props = defineProps({
@@ -78,9 +80,13 @@ function jumpToTrackStart() {
 }
 
 // 결과가 바뀌면 추적 시작 지점에서 다시 본다.
+// 결과가 오면 추적 시작 지점부터 바로 재생해서 박스가 따라가며 궤적이 쌓이는 모습을 보여 준다.
 watch(() => props.points, () => {
   playing.value = false
   jumpToTrackStart()
+  if (props.points?.length) {
+    videoEl.value?.play().then(() => { playing.value = true }).catch(() => {})
+  }
 })
 
 onBeforeUnmount(() => {
@@ -116,15 +122,18 @@ const timeLabel = computed(() => {
       />
 
       <div v-if="!points" class="player__empty">
-        <p class="faint">ROI 추적 전</p>
+        <RadarEmpty :size="116">
+          <p class="radar-empty__title">ROI 추적 전</p>
+          <p class="faint">왼쪽에서 객체를 지정하고 ROI 추적을 누르세요</p>
+        </RadarEmpty>
       </div>
     </div>
 
-    <div class="player__controls">
-      <button class="player__icon" :disabled="!points" @click="togglePlay">
-        {{ playing ? '❚❚' : '▶' }}
+    <div class="strip player__controls">
+      <button class="btn-ghost btn-icon" :disabled="!points" :aria-label="playing ? '일시정지' : '재생'" @click="togglePlay">
+        <Icon :name="playing ? 'pause' : 'play'" />
       </button>
-      <button class="player__icon" :disabled="!points" @click="seekToFrame(frameIndex - 1)">◀</button>
+      <button class="btn-ghost btn-icon" :disabled="!points" aria-label="이전 프레임" @click="seekToFrame(frameIndex - 1)"><Icon name="prev" /></button>
       <input
         class="player__range"
         type="range"
@@ -132,7 +141,7 @@ const timeLabel = computed(() => {
         :disabled="!points"
         @input="seekToFrame(Number($event.target.value))"
       />
-      <button class="player__icon" :disabled="!points" @click="seekToFrame(frameIndex + 1)">▶</button>
+      <button class="btn-ghost btn-icon" :disabled="!points" aria-label="다음 프레임" @click="seekToFrame(frameIndex + 1)"><Icon name="next" /></button>
 
       <span class="mono player__frame">
         frame <b>{{ frameIndex }}</b> / {{ lastFrame }}
@@ -140,7 +149,7 @@ const timeLabel = computed(() => {
       </span>
     </div>
 
-    <div class="player__legend">
+    <div class="strip player__legend">
       <label class="player__toggle">
         <input v-model="showTrail" type="checkbox" :disabled="!points" />
         <span>궤적</span>
@@ -153,7 +162,7 @@ const timeLabel = computed(() => {
 
       <template v-if="trackRange">
         <span class="faint mono">추적 구간 f{{ trackRange.from }}–f{{ trackRange.to }}</span>
-        <button class="player__jump" @click="jumpToTrackStart">시작으로</button>
+        <button class="btn-ghost btn-sm" @click="jumpToTrackStart">시작으로</button>
         <span v-if="!inTrackRange" class="badge badge--warn">구간 밖</span>
       </template>
     </div>
@@ -171,7 +180,7 @@ const timeLabel = computed(() => {
   position: relative;
   flex: 1;
   min-height: 180px;
-  background: #05080c;
+  background: var(--bg-video);
   overflow: hidden;
 }
 .player__video {
@@ -182,42 +191,34 @@ const timeLabel = computed(() => {
   display: block;
 }
 .player__empty {
+  background: var(--bg-video);
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   padding: 20px;
 }
-.player__empty p { margin: 0; }
 
 .player__controls {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
+  gap: 4px;
 }
-.player__icon { padding: 4px 10px; min-width: 34px; }
 .player__range { flex: 1; accent-color: var(--accent); width: auto; }
 .player__frame { font-size: 12px; white-space: nowrap; }
 
 .player__legend {
-  flex: none;
-  display: flex;
-  align-items: center;
   gap: 12px;
-  padding: 7px 12px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 12px;
   flex-wrap: wrap;
 }
 .player__toggle { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 .player__toggle input { width: auto; accent-color: var(--accent); }
 .player__key { display: flex; align-items: center; gap: 5px; color: var(--text-dim); }
-.player__swatch { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+.player__swatch { width: 12px; height: 3px; display: inline-block; }
 .player__swatch--box { background: var(--bird); height: 9px; width: 9px; border: 1px solid var(--bird); background: transparent; }
 .player__swatch--trail { background: var(--accent); }
-.player__jump { padding: 2px 9px; font-size: 11px; }
 </style>

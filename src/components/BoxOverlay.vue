@@ -17,6 +17,7 @@
  */
 import { ref, shallowRef, watch, onMounted, onBeforeUnmount, computed } from 'vue'
 import { createFitTransform, toSourcePoint, rectToDisplay } from '../lib/videoGeometry.js'
+import { drawLock, drawRipple } from '../lib/overlayStyle.js'
 
 const props = defineProps({
   /** 기준이 되는 <video>. videoWidth/clientWidth 를 여기서 읽는다. */
@@ -42,6 +43,9 @@ const hoverPoint = shallowRef(null)
 const geometryVersion = ref(0)
 
 let resizeObserver = null
+/** 박스가 확정된 시각. 등장 연출에 쓴다. */
+let popStart = -Infinity
+const POP_MS = 700
 
 const transform = computed(() => {
   geometryVersion.value
@@ -185,15 +189,22 @@ function render() {
     : props.sourceBox
 
   if (previewSource) {
-    const box = rectToDisplay(tf, previewSource)
-    ctx.fillStyle = 'rgba(243,182,66,0.14)'
-    ctx.strokeStyle = '#f3b642'
-    ctx.lineWidth = 2
-    ctx.fillRect(box.x, box.y, box.width, box.height)
-    ctx.strokeRect(box.x, box.y, box.width, box.height)
-    drawCrosshair(ctx, box.x + box.width / 2, box.y + box.height / 2)
+    const shown = rectToDisplay(tf, previewSource)
+    // 대상이 작으면 박스도 몇 픽셀이라 안 보인다. 화면에서 최소 크기를 보장한다.
+    const w = Math.max(shown.width, 26)
+    const h = Math.max(shown.height, 26)
+    const box = { x: shown.x - (w - shown.width) / 2, y: shown.y - (h - shown.height) / 2, width: w, height: h }
 
-    if (!dragStart.value) drawLabel(ctx, box, formatBox(previewSource))
+    // 클릭 직후 0.7초는 고리가 퍼지고 박스가 조여 들어오는 연출을 한다.
+    const popAge = performance.now() - popStart
+    const popping = !dragStart.value && popAge < POP_MS
+    const k = Math.min(1, popAge / POP_MS)
+    if (popping) drawRipple(ctx, box.x + box.width / 2, box.y + box.height / 2, k)
+    drawLock(ctx, box, {
+      label: dragStart.value ? '' : formatBox(previewSource),
+      scale: popping ? 1 + 1.6 * Math.pow(1 - k, 2) : 1,
+    })
+    if (popping) requestAnimationFrame(render)
   }
 
   if (props.active && props.magnifier && hoverPoint.value) {
@@ -203,7 +214,7 @@ function render() {
 
 function drawCrosshair(ctx, x, y) {
   const arm = 9
-  ctx.strokeStyle = '#e05a37'
+  ctx.strokeStyle = '#e6ecf3'
   ctx.lineWidth = 1.5
   ctx.beginPath()
   ctx.moveTo(x - arm, y)
@@ -241,31 +252,18 @@ function drawMagnifier(ctx, tf, point, width, height) {
 
   ctx.save()
   ctx.imageSmoothingEnabled = false
-  ctx.fillStyle = '#10251f'
+  ctx.fillStyle = '#0b1119'
   ctx.fillRect(x - 3, y - 3, size + 6, size + 6)
   try {
     ctx.drawImage(video, sourceX, sourceY, sourceSize, sourceSize, x, y, size, size)
   } catch {
     // 아직 디코딩된 프레임이 없으면 그릴 게 없다. 확대경만 비워둔다.
   }
-  ctx.strokeStyle = '#f3b642'
+  ctx.strokeStyle = '#ffd23f'
   ctx.lineWidth = 2
   ctx.strokeRect(x, y, size, size)
   drawCrosshair(ctx, x + size / 2, y + size / 2)
   ctx.restore()
-}
-
-function drawLabel(ctx, box, text) {
-  ctx.font = '11px ui-monospace, Consolas, monospace'
-  const padding = 5
-  const width = ctx.measureText(text).width + padding * 2
-  const height = 18
-  const y = box.y - height - 3 < 0 ? box.y + 3 : box.y - height - 3
-
-  ctx.fillStyle = 'rgba(13,17,23,0.85)'
-  ctx.fillRect(box.x, y, width, height)
-  ctx.fillStyle = '#f3b642'
-  ctx.fillText(text, box.x + padding, y + 13)
 }
 
 function formatBox(box) {
@@ -315,7 +313,10 @@ watch(() => props.videoEl, (video, previous) => {
   invalidate()
 })
 
-watch(() => props.sourceBox, render)
+watch(() => props.sourceBox, (box) => {
+  if (box) popStart = performance.now()
+  render()
+})
 watch(() => props.active, (value) => {
   if (!value) hoverPoint.value = null
   render()

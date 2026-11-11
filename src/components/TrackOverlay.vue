@@ -13,6 +13,7 @@
  */
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { createFitTransform, rectToDisplay } from '../lib/videoGeometry.js'
+import { drawLock, drawTrail as drawStyledTrail } from '../lib/overlayStyle.js'
 
 const props = defineProps({
   videoEl: { type: Object, default: null },
@@ -33,7 +34,7 @@ const SOURCE_COLOR = {
   klt: '#ffdc00',          // KLT 광류 추적
   appearance: '#28a0dc',   // 외형 매칭으로 재포착
   motion: '#50dc46',       // 움직임 기반 복구
-  prediction: '#ff8c00',   // 관측 없이 예측만
+  prediction: '#b48cff',   // 관측 없이 예측만
   compensated: '#4da3ff',  // CSV 를 못 받아 보정 좌표로 대체한 경우
 }
 const DEFAULT_COLOR = '#ffdc00'
@@ -88,7 +89,7 @@ function render() {
   const point = byFrame.get(frame)
   const color = SOURCE_COLOR[point?.source] || DEFAULT_COLOR
 
-  if (props.showTrail) drawTrail(ctx, tf, frame, color)
+  if (props.showTrail) drawTrail(ctx, tf, frame)
 
   if (!point) drawNotice(ctx, tf, 'LOST', '#fbbf24')
   else if (!point.visible) drawBox(ctx, tf, point, color, true)
@@ -100,24 +101,18 @@ function render() {
  * AI 오버레이도 visible 일 때만 점을 더한다. 놓친 구간까지 이으면 있지도 않은
  * 궤적을 그리게 된다.
  */
-function drawTrail(ctx, tf, frame, color) {
-  ctx.strokeStyle = color
-  ctx.globalAlpha = 0.65
-  ctx.lineWidth = 2
-  ctx.lineJoin = 'round'
-  ctx.beginPath()
-
-  let started = false
+function drawTrail(ctx, tf, frame) {
+  const path = []
   for (const point of props.points) {
     if (point.frameIndex > frame) break
     if (!point.visible) continue
-    const x = point.cx * tf.intrinsicWidth * tf.scale + tf.offsetX
-    const y = point.cy * tf.intrinsicHeight * tf.scale + tf.offsetY
-    if (started) ctx.lineTo(x, y)
-    else { ctx.moveTo(x, y); started = true }
+    path.push({
+      x: point.cx * tf.intrinsicWidth * tf.scale + tf.offsetX,
+      y: point.cy * tf.intrinsicHeight * tf.scale + tf.offsetY,
+    })
   }
-  if (started) ctx.stroke()
-  ctx.globalAlpha = 1
+  // 굵고 빛나는 궤적. 오래된 쪽은 얇고 옅어서 최근 움직임이 도드라진다.
+  drawStyledTrail(ctx, path)
 }
 
 function drawBox(ctx, tf, point, color, predicted) {
@@ -135,28 +130,17 @@ function drawBox(ctx, tf, point, color, predicted) {
   const drawX = box.x - (drawWidth - box.width) / 2
   const drawY = box.y - (drawHeight - box.height) / 2
 
-  ctx.strokeStyle = color
-  ctx.lineWidth = 2
-  // 관측 없이 예측만 한 프레임은 점선으로 구분한다.
-  if (predicted) ctx.setLineDash([5, 4])
-  ctx.strokeRect(drawX, drawY, drawWidth, drawHeight)
-  ctx.setLineDash([])
-
-  const text = `f${point.frameIndex} ${point.source} ${point.conf.toFixed(2)}`
-  ctx.font = '11px ui-monospace, Consolas, monospace'
-  const padding = 5
-  const labelWidth = ctx.measureText(text).width + padding * 2
-  const labelY = drawY - 19 < 0 ? drawY + drawHeight + 3 : drawY - 19
-
-  ctx.fillStyle = 'rgba(13,17,23,0.85)'
-  ctx.fillRect(drawX, labelY, labelWidth, 17)
-  ctx.fillStyle = color
-  ctx.fillText(text, drawX + padding, labelY + 12)
+  // 테두리 색은 추적 방식을 뜻하고, 관측 없이 예측만 한 프레임은 점선이다.
+  drawLock(ctx, { x: drawX, y: drawY, width: drawWidth, height: drawHeight }, {
+    color,
+    dashed: predicted,
+    label: `f${point.frameIndex} ${point.source} ${point.conf.toFixed(2)}`,
+  })
 }
 
 /** 그 프레임에 아무 기록이 없는 경우. 추적 구간 밖이거나 완전히 놓친 구간이다. */
 function drawNotice(ctx, tf, text, color) {
-  ctx.font = '11px ui-monospace, Consolas, monospace'
+  ctx.font = '11px "IBM Plex Mono", ui-monospace, Consolas, monospace'
   ctx.fillStyle = 'rgba(13,17,23,0.85)'
   ctx.fillRect(tf.offsetX + 8, tf.offsetY + 8, ctx.measureText(text).width + 12, 17)
   ctx.fillStyle = color

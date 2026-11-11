@@ -14,7 +14,9 @@
  * 순간 프레임을 고정하고(selectionFrame), 추적은 그 값으로 보낸다.
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import Icon from './Icon.vue'
 import BoxOverlay from './BoxOverlay.vue'
+import AnalyzeOverlay from './AnalyzeOverlay.vue'
 import OverlayPlayer from './OverlayPlayer.vue'
 import AnalysisResult from './AnalysisResult.vue'
 import TrackingTuning from './TrackingTuning.vue'
@@ -41,6 +43,7 @@ let pickedFile = null           // 판정 모델을 바꾸면 그 서버에 다�
 const uploading = ref(false)
 const uploadError = ref(null)
 const previewError = ref(false) // 브라우저가 영상을 재생하지 못함 (코덱)
+const dragOver = ref(false)     // 드롭 영역 위에 파일을 끌고 있는 중
 
 // 선택 상태
 const sourceBox = ref(null)     // 원본 픽셀 {x, y, width, height}
@@ -51,6 +54,14 @@ const playing = ref(false)
 const geometryVersion = ref(0)
 
 // 추적 설정
+/** 초기 객체 지정 + 추적 설정 묶음을 펼쳐 둘지. 마지막 선택을 기억한다. */
+const SETUP_KEY = 'skydetect.upload.setupOpen'
+const setupOpen = ref((() => {
+  try { return localStorage.getItem(SETUP_KEY) !== '0' } catch { return true }
+})())
+watch(setupOpen, (open) => {
+  try { localStorage.setItem(SETUP_KEY, open ? '1' : '0') } catch { /* 저장 불가 */ }
+})
 const tuning = ref({ ...DEFAULT_TUNING })
 const options = ref({ stabilize: true, resizeWidth: 1280, maxSeconds: 10 })
 
@@ -103,6 +114,27 @@ async function onFilePicked(event) {
   } finally {
     uploading.value = false
   }
+}
+
+/**
+ * 끌어다 놓은 파일도 선택창으로 고른 것과 같은 경로로 처리한다.
+ * onFilePicked 가 event.target.files[0] 만 읽으므로 같은 모양의 객체를 넘긴다.
+ */
+function onDrop(event) {
+  dragOver.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+  const isVideo = file.type.startsWith('video/') || /\.(mp4|avi|mov|mkv|mpg|mpeg)$/i.test(file.name)
+  if (!isVideo) {
+    uploadError.value = new Error('영상 파일만 올릴 수 있습니다.')
+    return
+  }
+  onFilePicked({ target: { files: [file] } })
+}
+
+function onDragLeave(event) {
+  // 자식 요소로 옮겨 갈 때도 dragleave 가 오므로 영역 밖으로 나간 경우만 끈다.
+  if (!event.currentTarget.contains(event.relatedTarget)) dragOver.value = false
 }
 
 function reset() {
@@ -385,22 +417,9 @@ const scaleLabel = computed(() => {
     fit: 'contain',
   })
   if (!tf) return null
-  return tf.intrinsicWidth + 'x' + tf.intrinsicHeight
-    + ' → ' + Math.round(tf.displayWidth) + 'x' + Math.round(tf.displayHeight)
+  return '원본 ' + tf.intrinsicWidth + 'x' + tf.intrinsicHeight
+    + ', 표시 ' + Math.round(tf.displayWidth) + 'x' + Math.round(tf.displayHeight)
     + ' (' + tf.scale.toFixed(3) + 'x)'
-})
-
-/** CODEX 의 결과 요약 한 줄과 같은 구성. */
-const resultSummary = computed(() => {
-  const r = result.value
-  if (!r) return null
-  const quality = r.track?.quality || {}
-  return [
-    `${quality.num_points ?? '-'} observed`,
-    `${pct(r.metrics?.visible_ratio)} visible`,
-    quality.track_stability || 'unknown',
-    r.metrics?.method || 'manual_roi',
-  ].join(' · ')
 })
 
 const metricRows = computed(() => {
@@ -473,11 +492,9 @@ watch(objectUrl, () => { result.value = null })
 
 <template>
   <main class="upload">
-    <!-- 선택 중에는 원본을 전체 폭으로 넓힌다.
-         ROI 는 원본 픽셀 단위라, 영상이 작게 보이면 화면 1px 이 원본 여러 px 을
-         가리켜 클릭이 몇 px 만 빗나가도 대상에서 벗어난다. 그때 오버레이
-         재생기는 볼 일이 없으므로 자리를 내준다. -->
-    <div class="upload__top" :class="{ 'upload__top--focus': selectionMode }">
+    <!-- 객체 선택 중에도 두 화면 배치를 그대로 둔다. 작은 대상은 BoxOverlay 의
+         돋보기로 확대해 보며 고른다. -->
+    <div class="upload__top">
       <!-- 왼쪽: 원본 + ROI 지정 -->
       <section class="panel">
         <div class="panel__head">
@@ -489,21 +506,25 @@ watch(objectUrl, () => { result.value = null })
           <span v-else-if="sourceBox" class="badge badge--ok"><span class="dot" />ROI 지정됨</span>
           <span v-else-if="uploaded && previewError" class="badge badge--error"><span class="dot" />재생 불가</span>
           <span v-else-if="uploaded" class="badge badge--ok"><span class="dot" />준비됨</span>
-          <span
-            v-if="uploaded?.transcoded"
-            class="badge"
-            :title="`원본 코덱 ${uploaded.original_codec || '알 수 없음'} → 브라우저 재생용 H.264 로 변환`"
-          >H.264 변환됨</span>
           <div style="flex: 1" />
           <span v-if="fileName" class="faint mono upload__name">{{ fileName }}</span>
-          <button v-if="uploaded" class="upload__change" @click="fileInput.click()">다른 영상</button>
+          <button v-if="uploaded" class="btn-ghost btn-sm" @click="fileInput.click()">다른 영상</button>
         </div>
 
         <div class="panel__body">
-          <div v-if="!objectUrl" class="upload__drop">
-            <p class="dim">분석할 영상을 선택하세요</p>
-            <button class="upload__pick" @click="fileInput.click()">영상 선택</button>
-            <p class="faint">mp4 · avi · mov · mkv · mpg</p>
+          <div
+            v-if="!objectUrl"
+            class="upload__drop"
+            :class="{ 'upload__drop--over': dragOver }"
+            @dragenter.prevent="dragOver = true"
+            @dragover.prevent="dragOver = true"
+            @dragleave.prevent="onDragLeave"
+            @drop.prevent="onDrop"
+          >
+            <Icon name="upload" :size="16" class="dim" />
+            <p>영상을 끌어다 놓거나 선택하세요</p>
+            <button class="btn-primary upload__pick" @click="fileInput.click()">영상 선택</button>
+            <p class="dim upload__formats">mp4 · avi · mov · mkv · mpg</p>
             <p v-if="uploadError" class="upload__error">{{ uploadError.message }}</p>
           </div>
 
@@ -525,7 +546,9 @@ watch(objectUrl, () => { result.value = null })
                 브라우저에서 재생할 수 없는 영상입니다 (코덱).
                 H.264 mp4 로 변환해서 다시 올려 주세요.
               </p>
+              <AnalyzeOverlay v-if="running" :video-el="videoEl" :source-box="sourceBox" />
               <BoxOverlay
+                v-else
                 :video-el="videoEl"
                 :source-box="sourceBox"
                 :active="selectionMode && !running"
@@ -534,28 +557,29 @@ watch(objectUrl, () => { result.value = null })
               />
             </div>
 
-            <div class="upload__scrub">
+            <div class="strip upload__scrub">
               <button
-                class="upload__icon"
+                class="btn-ghost btn-icon"
                 :disabled="selectionMode"
+                :aria-label="playing ? '일시정지' : '재생'"
                 @click="togglePlay"
-              >{{ playing ? '❚❚' : '▶' }}</button>
-              <button class="upload__icon" @click="seekToFrame(frameIndex - 1)">◀</button>
+              ><Icon :name="playing ? 'pause' : 'play'" /></button>
+              <button class="btn-ghost btn-icon" aria-label="이전 프레임" @click="seekToFrame(frameIndex - 1)"><Icon name="prev" /></button>
               <input
                 class="upload__range" type="range"
                 :min="0" :max="lastFrame" :value="frameIndex"
                 @input="seekToFrame(Number($event.target.value))"
               />
-              <button class="upload__icon" @click="seekToFrame(frameIndex + 1)">▶</button>
+              <button class="btn-ghost btn-icon" aria-label="다음 프레임" @click="seekToFrame(frameIndex + 1)"><Icon name="next" /></button>
               <span class="mono upload__frame">
                 frame <b>{{ frameIndex }}</b> / {{ lastFrame }}
                 <span class="faint">· {{ fps.toFixed(0) }}fps</span>
               </span>
             </div>
 
-            <div class="upload__select">
+            <div class="strip upload__select">
               <button
-                class="upload__select-btn"
+                class="btn-primary"
                 :disabled="!uploaded || selectionMode || running"
                 @click="beginSelection"
               >객체 선택</button>
@@ -563,7 +587,7 @@ watch(objectUrl, () => { result.value = null })
               <span class="faint upload__hint">{{ selectionHint }}</span>
             </div>
 
-            <div class="upload__coords">
+            <div class="strip upload__coords">
               <span class="faint mono">{{ scaleLabel }}</span>
               <div style="flex: 1" />
               <span v-if="sourceBox" class="mono upload__bbox">
@@ -576,7 +600,7 @@ watch(objectUrl, () => { result.value = null })
       </section>
 
       <!-- 오른쪽: 추적 오버레이 재생 -->
-      <section v-show="!selectionMode" class="panel">
+      <section class="panel">
         <div class="panel__head">
           <span class="panel__title">추적 오버레이</span>
           <span v-if="running" class="badge badge--warn">
@@ -584,7 +608,6 @@ watch(objectUrl, () => { result.value = null })
           </span>
           <span v-else-if="result" class="badge badge--ok"><span class="dot" />완료</span>
           <div style="flex: 1" />
-          <span v-if="resultSummary" class="faint mono upload__summary">{{ resultSummary }}</span>
         </div>
 
         <div class="panel__body">
@@ -606,8 +629,24 @@ watch(objectUrl, () => { result.value = null })
 
     <!-- 아래: 초기 객체 지정 + 추적 설정 + 실행 + 결과 -->
     <section class="panel upload__bottom">
+      <button
+        type="button"
+        class="setup__toggle"
+        :aria-expanded="setupOpen"
+        aria-controls="upload-setup"
+        @click="setupOpen = !setupOpen"
+      >
+        <Icon :name="setupOpen ? 'up' : 'down'" />
+        <span>초기 객체 지정 · 추적 설정</span>
+        <span v-if="!setupOpen && sourceBox" class="faint mono setup__summary">
+          frame {{ selectionFrame ?? frameIndex }} · bbox {{ Math.round(sourceBox.width) }}×{{ Math.round(sourceBox.height) }}
+        </span>
+        <span class="faint setup__state">{{ setupOpen ? '접기' : '펼치기' }}</span>
+      </button>
+
+      <div v-show="setupOpen" id="upload-setup" class="setup">
       <div class="target">
-        <span class="target__title">초기 객체 지정</span>
+        <span class="eyebrow">초기 객체 지정</span>
         <div class="target__fields">
           <label class="field">
             <span class="dim">시작 프레임</span>
@@ -667,9 +706,10 @@ watch(objectUrl, () => { result.value = null })
         :disabled="running"
         layout="row"
       />
+      </div>
 
       <div class="upload__actions">
-        <button class="upload__run" :disabled="!canRun" @click="run">ROI 추적</button>
+        <button class="btn-primary upload__run" :disabled="!canRun" @click="run">ROI 추적</button>
         <span v-if="!uploaded" class="faint">영상을 먼저 올리세요</span>
         <span v-else-if="!sourceBox" class="faint">객체 선택으로 ROI 를 지정하세요</span>
         <p v-if="runError" class="upload__error">{{ runError.message }}</p>
@@ -677,13 +717,13 @@ watch(objectUrl, () => { result.value = null })
         <div style="flex: 1" />
 
         <div v-if="result" class="upload__downloads">
-          <a v-if="result.urls.trackSequence" :href="result.urls.trackSequence" download>TrackSequence</a>
-          <a v-if="result.urls.trajectory" :href="result.urls.trajectory" download>Trajectory CSV</a>
-          <a v-if="result.urls.metrics" :href="result.urls.metrics" download>Metrics</a>
+          <a v-if="result.urls.trackSequence" :href="result.urls.trackSequence" download><Icon name="download" :size="12" />TrackSequence</a>
+          <a v-if="result.urls.trajectory" :href="result.urls.trajectory" download><Icon name="download" :size="12" />Trajectory CSV</a>
+          <a v-if="result.urls.metrics" :href="result.urls.metrics" download><Icon name="download" :size="12" />Metrics</a>
           <a
             v-if="result.urls.overlay" :href="result.urls.overlay" download
-          >Overlay (mp4v)</a>
-          <a v-if="result.urls.foregroundMask" :href="result.urls.foregroundMask" download>Foreground</a>
+          ><Icon name="download" :size="12" />Overlay (mp4v)</a>
+          <a v-if="result.urls.foregroundMask" :href="result.urls.foregroundMask" download><Icon name="download" :size="12" />Foreground</a>
         </div>
       </div>
 
@@ -727,46 +767,56 @@ watch(objectUrl, () => { result.value = null })
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--gap);
   overflow-y: auto;
 }
 .upload__top {
   display: grid;
   /* 왼쪽(ROI 지정)이 정밀 작업이라 조금 더 넓게 준다. */
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--gap);
   /* 영상이 클수록 클릭 한 픽셀이 가리키는 원본 픽셀이 줄어 ROI 가 정확해진다. */
   min-height: 700px;
 }
-/* 선택 중에는 높이도 화면만큼 키운다. 가로만 넓히면 contain 때문에 세로에
-   막혀 배율이 그대로다. */
-.upload__top--focus {
-  grid-template-columns: minmax(0, 1fr);
-  min-height: 92vh;
-}
 .upload__bottom { flex: none; }
 .upload__file { display: none; }
-.upload__name { font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
-.upload__summary { font-size: 11px; }
-.upload__change { padding: 3px 10px; font-size: 11px; }
+.upload__name { font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.upload__summary { font-size: 12px; }
 
+/* 점선 드롭 영역. 패널 안쪽 24px 에 두고, 파일을 끌어오면 테두리가 강조색이 된다. */
 .upload__drop {
   flex: 1;
+  margin: 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
   text-align: center;
+  transition: border-color 100ms, background 100ms;
 }
+.upload__drop--over { border-color: var(--accent); background: var(--accent-dim); }
+.upload__drop > .icon {
+  width: 44px;
+  height: 44px;
+  padding: 13px;
+  border-radius: var(--radius);
+  color: var(--text);
+  background: #2a3038;
+  border: 1px solid #3d4651;
+}
+.upload__drop > p:first-of-type { font-size: 14px; font-weight: 600; color: var(--text); }
 .upload__drop p { margin: 0; }
-.upload__pick { background: var(--accent-dim); border-color: var(--accent); font-weight: 600; }
+.upload__formats { font-size: 12px; }
+.upload__pick { height: 36px; padding: 0 20px; }
 
 .upload__stage {
   position: relative;
   flex: 1;
   min-height: 180px;
-  background: #05080c;
+  background: var(--bg-video);
   overflow: hidden;
 }
 .upload__video {
@@ -778,42 +828,25 @@ watch(objectUrl, () => { result.value = null })
 }
 
 .upload__scrub {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
+  gap: 4px;
 }
-.upload__icon { padding: 4px 10px; min-width: 34px; }
 .upload__range { flex: 1; accent-color: var(--accent); width: auto; }
 .upload__frame { font-size: 12px; white-space: nowrap; }
 
-.field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .field input { padding: 6px 8px; font-size: 12px; }
 
 .upload__select {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
   flex-wrap: wrap;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
-.upload__select-btn { background: var(--accent-dim); border-color: var(--accent); font-weight: 600; }
-.upload__select-btn:hover:not(:disabled) { background: #2a6396; }
-.upload__hint { font-size: 11px; flex: 1; min-width: 200px; }
+.upload__hint { font-size: 12px; flex: 1; min-width: 200px; }
 
 .upload__coords {
-  flex: none;
-  display: flex;
-  align-items: center;
   gap: 10px;
-  padding: 6px 12px;
   font-size: 12px;
-  border-top: 1px solid var(--border);
-  min-height: 30px;
+  min-height: 32px;
 }
 .upload__bbox { color: var(--accent); }
 
@@ -828,8 +861,22 @@ watch(objectUrl, () => { result.value = null })
 }
 .upload__waiting p { margin: 0; }
 
-.target { padding: 14px 14px 0; }
-.target__title { font-weight: 600; font-size: 13px; }
+.setup__toggle {
+  width: 100%;
+  height: 44px;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.setup__toggle:hover:not(:disabled) { background: var(--bg-hover); border: none; }
+.setup__summary { font-weight: 400; }
+.setup__state { margin-left: auto; font-weight: 500; }
+.target { padding: 14px 14px 0; border-top: 1px solid var(--border); }
 .target__fields {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -838,14 +885,14 @@ watch(objectUrl, () => { result.value = null })
 }
 
 .debug { padding: 0 14px 14px; }
-.debug__toggle { padding: 4px 12px; font-size: 11px; background: transparent; }
+.debug__toggle { padding: 4px 12px; font-size: 12px; background: transparent; }
 .debug__body {
   margin: 10px 0 0;
   padding: 12px;
-  background: #05080c;
+  background: var(--bg-video);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   max-height: 280px;
   overflow: auto;
@@ -862,24 +909,25 @@ watch(objectUrl, () => { result.value = null })
   border-top: 1px solid var(--border);
 }
 .upload__run {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  font-weight: 600;
-  padding: 10px 22px;
+  height: 36px;
+  padding: 0 22px;
 }
-.upload__run:hover:not(:disabled) { background: #2a6396; }
 .upload__error { color: var(--danger); font-size: 12px; margin: 0; }
 
 .upload__downloads { display: flex; gap: 8px; flex-wrap: wrap; }
 .upload__downloads a {
-  font-size: 11px;
-  padding: 5px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   color: var(--text-dim);
   text-decoration: none;
 }
-.upload__downloads a:hover { color: var(--text); border-color: var(--accent-dim); }
+.upload__downloads a:hover { color: var(--text); background: var(--bg-hover); }
 
 .upload__metrics {
   display: grid;
@@ -890,7 +938,7 @@ watch(objectUrl, () => { result.value = null })
   border-top: 1px solid var(--border);
   font-size: 12px;
 }
-.upload__metrics dt { font-size: 11px; }
+.upload__metrics dt { font-size: 12px; }
 .upload__metrics dd { margin: 0; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 1300px) {
