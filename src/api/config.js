@@ -7,11 +7,11 @@ function pick(value, allowed, fallback) {
 }
 
 /**
- * 클립을 어디서 가져올지: 'mock' | 'backend'
- * 백엔드에 /api/clips 가 생기면 .env 에서 backend 로 바꾼다.
+ * 클립을 어디서 가져올지: 'mock' | 'backend' | 'local'
+ * local은 이 독립 Pi 실험의 인증된 로컬 브리지를 사용한다.
  */
 export const CLIP_SOURCE = pick(
-  import.meta.env.VITE_CLIP_SOURCE, ['mock', 'backend'], 'mock',
+  import.meta.env.VITE_CLIP_SOURCE, ['mock', 'backend', 'local', 'spring-pi'], 'mock',
 )
 
 /**
@@ -29,6 +29,7 @@ export const ANALYSIS_SOURCE = pick(
 
 /** 라이브 HLS 플레이리스트. 기본값은 네트워크 없이도 도는 로컬 파일. */
 export const HLS_URL = import.meta.env.VITE_HLS_URL || '/mock/hls/live.m3u8'
+export const WHEP_URL = import.meta.env.VITE_WHEP_URL || ''
 
 /* AI 서버 프록시 접두어는 판정 모델마다 다르다. lib/aiModel.js 의 aiBase() 를 쓴다. */
 

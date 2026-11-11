@@ -9,20 +9,31 @@
  */
 import { ref, watch, onBeforeUnmount } from 'vue'
 import Hls from 'hls.js'
+import { LIVE_HLS_CONFIG, FAST_LIVE_HLS_CONFIG, readLiveDelay } from './liveHlsConfig.js'
 
 /**
  * @param {import('vue').Ref<HTMLVideoElement|null>} videoRef
  * @param {import('vue').Ref<string>} sourceRef  .m3u8 주소
  */
-export function useHls(videoRef, sourceRef) {
+export function useHls(videoRef, sourceRef, enabled = ref(true)) {
   /** 'idle' | 'loading' | 'playing' | 'paused' | 'blocked' | 'error' */
   const status = ref('idle')
   const error = ref(null)
   const engine = ref('none') // 'native' | 'hls.js' | 'none'
+  const fastMode = ref(false)
+  const liveDelay = ref(null)
+  const stalls = ref(0)
 
   let hls = null
+  let metricsTimer = null
+  let reconnectTimer = null
 
   function teardown() {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+    clearInterval(metricsTimer)
+    metricsTimer = null
+    liveDelay.value = null
     if (hls) {
       hls.destroy()
       hls = null
@@ -37,11 +48,13 @@ export function useHls(videoRef, sourceRef) {
   function attach() {
     const video = videoRef.value
     const source = sourceRef.value
-    if (!video || !source) return
+    if (!video || !source || !enabled.value) return
 
     teardown()
+    video.srcObject = null
     status.value = 'loading'
     error.value = null
+    stalls.value = 0
 
     // 순서에 주의: hls.js 를 먼저 본다.
     //
@@ -66,19 +79,15 @@ export function useHls(videoRef, sourceRef) {
     }
 
     engine.value = 'hls.js'
-    hls = new Hls({
-      // 관제 화면이므로 지연을 짧게 유지한다. 뒤처지면 라이브 엣지로 따라붙는다.
-      lowLatencyMode: true,
-      liveSyncDurationCount: 3,
-      // 끊겼을 때 자동 재시도
-      manifestLoadingMaxRetry: 6,
-      levelLoadingMaxRetry: 6,
-      fragLoadingMaxRetry: 6,
-    })
+    hls = new Hls({ ...(fastMode.value ? FAST_LIVE_HLS_CONFIG : LIVE_HLS_CONFIG) })
+    metricsTimer = setInterval(() => {
+      liveDelay.value = status.value === 'playing' ? readLiveDelay(hls, video) : null
+    }, 500)
 
     hls.on(Hls.Events.MANIFEST_PARSED, tryPlay)
 
     hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) stalls.value++
       if (!data.fatal) return
       // 치명적 오류는 종류별로 복구 방법이 다르다. 무조건 destroy 하면
       // 잠깐의 네트워크 끊김에도 화면이 영영 죽는다.
@@ -86,7 +95,9 @@ export function useHls(videoRef, sourceRef) {
         case Hls.ErrorTypes.NETWORK_ERROR:
           status.value = 'error'
           error.value = new Error(`스트림을 불러오지 못했습니다 (${data.details})`)
-          hls.startLoad()
+          // A restarted MediaMTX expires the session in the child playlist URL.
+          // Reload the master rather than retrying that expired URL forever.
+          if (!reconnectTimer) reconnectTimer = setTimeout(attach, 2000)
           break
         case Hls.ErrorTypes.MEDIA_ERROR:
           status.value = 'error'
@@ -102,6 +113,20 @@ export function useHls(videoRef, sourceRef) {
 
     hls.loadSource(source)
     hls.attachMedia(video)
+  }
+
+  function goLive() {
+    const video = videoRef.value
+    const position = hls?.liveSyncPosition
+    if (video && Number.isFinite(position) && position > video.currentTime) {
+      video.currentTime = position
+    }
+    tryPlay()
+  }
+
+  function toggleFastMode() {
+    fastMode.value = !fastMode.value
+    attach()
   }
 
   /**
@@ -152,10 +177,11 @@ export function useHls(videoRef, sourceRef) {
     video?.removeEventListener('pause', onPause)
   }
 
-  watch([videoRef, sourceRef], ([video], [previousVideo]) => {
+  watch([videoRef, sourceRef, enabled], ([video, , active], [previousVideo]) => {
     if (previousVideo && previousVideo !== video) unbind(previousVideo)
     if (!video) return
     unbind(video)
+    if (!active) { teardown(); status.value = 'idle'; return }
     bind(video)
     attach()
   }, { immediate: true })
@@ -169,6 +195,11 @@ export function useHls(videoRef, sourceRef) {
     status,
     error,
     engine,
+    fastMode,
+    liveDelay,
+    stalls,
+    goLive,
+    toggleFastMode,
     /** 스트림을 처음부터 다시 붙인다 (네트워크 오류 복구용) */
     retry: attach,
     /** 사용자 클릭으로 재생 재개 (자동재생 차단/절전 정지 복구용) */

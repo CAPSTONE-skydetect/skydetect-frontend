@@ -9,7 +9,7 @@
  * 실서버 경로/필드는 제안 명세지 확정이 아니다. docs/api-questions.md 참고.
  */
 import { http } from './http.js'
-import { ANALYSIS_SOURCE } from './config.js'
+import { ANALYSIS_SOURCE, CLIP_SOURCE } from './config.js'
 import * as mock from './mock/mockBackend.js'
 import * as ai from './ai.js'
 
@@ -27,19 +27,55 @@ import * as ai from './ai.js'
  */
 export function createAnalysis(clipId, payload, context) {
   if (ANALYSIS_SOURCE === 'mock') return mock.createAnalysis(clipId, payload)
+  if (context?.localClip) {
+    return http.post(`/local-api/clips/${encodeURIComponent(clipId)}/analysis`, {
+      json: { ...payload, model: context.model },
+    })
+  }
   if (ANALYSIS_SOURCE === 'ai') return ai.createAnalysis(clipId, payload, context)
   return http.post(`/api/clips/${encodeURIComponent(clipId)}/analysis`, { json: payload })
 }
 
 /** 분석 상태 조회. DONE/FAILED 가 될 때까지 폴링한다. */
-export function fetchAnalysis(analysisId) {
+export async function fetchAnalysis(analysisId) {
   if (ANALYSIS_SOURCE === 'mock') return mock.fetchAnalysis(analysisId)
+  if (analysisId?.startsWith('local_anl_')) {
+    const job = await http.get(`/local-api/analyses/${encodeURIComponent(analysisId)}`)
+    if (job.status !== 'DONE' || !job.result) {
+      return { analysisId, status: job.status, message: job.message, request: job.request }
+    }
+    const result = job.result
+    const track = result.track
+    const points = result.points || await ai.fetchTrajectory(result.trajectoryUrl, {
+      processedWidth: track?.processed_width,
+      processedHeight: track?.processed_height,
+    }).catch(() => null)
+    return {
+      ...ai.toAnalysisDto(result.prediction, {
+        analysisId: result.analysisId,
+        clipId: result.clipId,
+        elapsedMs: result.elapsedMs,
+        model: result.model,
+        featureValues: result.features?.values || null,
+        trackStartS: ai.trackStartSeconds(track),
+      }),
+      track,
+      points: points || [],
+      fps: result.metadata?.fps || null,
+      overlayUrl: result.overlayUrl || null,
+      trackSequenceUrl: result.trackSequenceUrl || null,
+      metrics: result.metrics,
+      features: result.features,
+      request: result.request,
+    }
+  }
   if (ANALYSIS_SOURCE === 'ai') return ai.fetchAnalysis(analysisId)
   return http.get(`/api/analyses/${encodeURIComponent(analysisId)}`)
 }
 
 /** 분석 이력 목록. */
 export function fetchAnalysisHistory() {
+  if (CLIP_SOURCE === 'local' || CLIP_SOURCE === 'spring-pi') return http.get('/local-api/analyses')
   if (ANALYSIS_SOURCE === 'mock') return mock.fetchAnalysisHistory()
   if (ANALYSIS_SOURCE === 'ai') return ai.fetchAnalysisHistory()
   return http.get('/api/analyses')

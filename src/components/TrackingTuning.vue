@@ -12,6 +12,7 @@
  */
 import { computed } from 'vue'
 import { DEFAULT_TUNING } from '../api/ai.js'
+import TrackerProfileSelect from './TrackerProfileSelect.vue'
 
 const props = defineProps({
   /** { kltAcceptConf, recoveryConf, updateConf, searchRadius, onlineUpdate } */
@@ -59,6 +60,8 @@ const isDefault = computed(() =>
     </div>
 
     <div class="tuning__fields">
+    <TrackerProfileSelect :model-value="tuning.trackerVariant ?? 'd0'" :disabled="disabled"
+      @update:model-value="setTuning('trackerVariant', $event)" />
     <div class="tuning__row">
       <label class="field">
         <span class="dim">추적 시간 (초)</span>

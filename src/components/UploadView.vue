@@ -22,6 +22,7 @@ import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory, evidenceOf } from '../lib/historyStore.js'
 import { aiModel, aiBase } from '../lib/aiModel.js'
+import { trackerLabel } from '../lib/trackerProfiles.js'
 import {
   uploadVideo, runManualTracking, toAnalysisDto, toProxiedUrl, trackStartSeconds,
   fetchTrajectory, pointsFromHistory, DEFAULT_TUNING,
@@ -346,7 +347,7 @@ async function run() {
         topFeatures: analysis.topFeatures,
         ...evidenceOf(analysis),
         metrics: response.metrics || null,
-        tuning: { ...tuning.value, ...options.value },
+        tuning: { ...request.tuning, stabilize: request.stabilize, resizeWidth: request.resizeWidth, maxSeconds: request.maxSeconds },
         processingTimeMs: elapsedMs,
         thumbnail,
         overlayUrl: urls.overlay,
@@ -441,6 +442,7 @@ const debugText = computed(() => {
       resize_width: r.resizeWidth,
       max_seconds: r.maxSeconds,
       tuning: {
+        tracker_variant: r.tuning.trackerVariant ?? 'd0',
         klt_accept_conf: r.tuning.kltAcceptConf,
         recovery_conf: r.tuning.recoveryConf,
         update_conf: r.tuning.updateConf,
@@ -450,6 +452,7 @@ const debugText = computed(() => {
     },
     response: result.value ? {
       run_id: result.value.metadata?.run_id,
+      tracker_variant: result.value.metadata?.tracker_variant,
       init_frame_index: result.value.metadata?.init_frame_index,
       coordinate_mode: result.value.metadata?.coordinate_mode,
       label: result.value.analysis?.label,
@@ -685,6 +688,7 @@ watch(objectUrl, () => { result.value = null })
       </div>
 
       <template v-if="result">
+        <p v-if="result" class="faint">사용한 추적 방식: {{ trackerLabel(result.metadata?.tracker_variant) }}</p>
         <AnalysisResult
           :analysis="result.analysis"
           :feature-reasons="result.features?.reasons"
