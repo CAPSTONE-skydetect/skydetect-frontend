@@ -12,10 +12,13 @@
  *   DONE          결과
  *   (+ CLIP_FAILED / ANALYSIS_FAILED)
  */
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import Icon from './Icon.vue'
 import BoxOverlay from './BoxOverlay.vue'
 import AnalysisResult from './AnalysisResult.vue'
 import TrackOverlay from './TrackOverlay.vue'
+import AnalyzeOverlay from './AnalyzeOverlay.vue'
+import RadarEmpty from './RadarEmpty.vue'
 import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory, evidenceOf } from '../lib/historyStore.js'
@@ -259,6 +262,21 @@ function redraw() {
 /** A 파트 추적 결과. AI 경로로 분석했을 때만 온다. */
 const trackPoints = computed(() => clip.value?.analysis?.points || null)
 
+/**
+ * 결과가 나오면 추적 오버레이로 바꾸고, 지정한 프레임부터 한 번 재생해
+ * 박스가 대상을 따라가며 궤적이 쌓이는 모습을 바로 보여 준다.
+ */
+watch(() => [clip.value?.clipId, state.value, trackPoints.value], ([, current, points]) => {
+  if (current !== 'DONE' || !points?.length) return
+  showOverlay.value = true
+  nextTick(() => {
+    const video = videoEl.value
+    if (!video) return
+    seekToFrame(clip.value?.analysis?.request?.initFrameIndex ?? points[0].frameIndex)
+    video.play().then(() => { playing.value = true }).catch(() => {})
+  })
+})
+
 // 표시용 ------------------------------------------------------------------
 
 const STATE_LABEL = {
@@ -291,8 +309,8 @@ const scaleLabel = computed(() => {
   })
   if (!tf) return null
 
-  const label = tf.intrinsicWidth + 'x' + tf.intrinsicHeight
-    + ' → ' + Math.round(tf.displayWidth) + 'x' + Math.round(tf.displayHeight)
+  const label = '원본 ' + tf.intrinsicWidth + 'x' + tf.intrinsicHeight
+    + ', 표시 ' + Math.round(tf.displayWidth) + 'x' + Math.round(tf.displayHeight)
     + ' (' + tf.scale.toFixed(3) + 'x)'
   // 레터박스 여백이 있으면 같이 보여준다. 좌표가 어긋날 때 먼저 의심할 값이다.
   const padX = Math.round(tf.offsetX)
@@ -331,22 +349,22 @@ const timeLabel = computed(() => {
       <span v-if="clip" class="faint mono clip__id">{{ clip.clipId }}</span>
       <button
         v-if="clip"
-        class="clip__close"
+        class="btn-ghost btn-sm btn-icon"
         title="패널 비우기"
         @click="session.clearSelection()"
-      >✕</button>
+      ><Icon name="close" /></button>
     </div>
 
     <div class="panel__body">
-      <div v-if="state === 'IDLE'" class="clip__empty">
-        <p class="faint">검출 대기</p>
-      </div>
+      <RadarEmpty v-if="state === 'IDLE'">
+        <p class="radar-empty__title">검출 대기</p>
+        <p class="faint">왼쪽에서 <b class="clip__key">검출</b>을 누르면 그 시각 전후 구간이 여기에 뜹니다.</p>
+      </RadarEmpty>
 
       <div v-else-if="state === 'CLIP_PENDING'" class="clip__pending">
-        <div class="spinner clip__pending-spinner" />
         <p class="dim">
           구간 저장 중
-          <b v-if="remainingSeconds !== null" class="mono">{{ remainingSeconds }}초</b>
+          <b v-if="remainingSeconds !== null" class="mono">{{ remainingSeconds }}s</b>
         </p>
         <div class="clip__progress">
           <div class="clip__progress-bar" :style="pendingBarStyle" />
@@ -378,6 +396,11 @@ const timeLabel = computed(() => {
             :points="trackPoints"
             :fps="meta?.fps || 30"
           />
+          <AnalyzeOverlay
+            v-if="state === 'ANALYZING'"
+            :video-el="videoEl"
+            :source-box="sourceBox"
+          />
           <BoxOverlay
             v-if="!showOverlay"
             :video-el="videoEl"
@@ -388,15 +411,25 @@ const timeLabel = computed(() => {
           />
         </div>
 
-        <div class="clip__scrub">
-          <button class="clip__icon" :disabled="state !== 'CLIP_READY'" @click="togglePlay">
-            {{ playing ? '❚❚' : '▶' }}
-          </button>
+        <div class="strip clip__scrub">
           <button
-            class="clip__icon"
+            class="btn-ghost btn-icon"
+            :title="playing ? '일시정지' : '재생'"
+            :disabled="state !== 'CLIP_READY'"
+            @click="togglePlay"
+          ><Icon :name="playing ? 'pause' : 'play'" /></button>
+          <button
+            class="btn-ghost btn-icon"
+            title="이전 프레임"
             :disabled="state !== 'CLIP_READY'"
             @click="seekToFrame(frameIndex - 1)"
-          >◀</button>
+          ><Icon name="prev" /></button>
+          <button
+            class="btn-ghost btn-icon"
+            title="다음 프레임"
+            :disabled="state !== 'CLIP_READY'"
+            @click="seekToFrame(frameIndex + 1)"
+          ><Icon name="next" /></button>
           <input
             class="clip__range"
             type="range"
@@ -406,31 +439,24 @@ const timeLabel = computed(() => {
             :disabled="state !== 'CLIP_READY'"
             @input="seekToFrame(Number($event.target.value))"
           />
-          <button
-            class="clip__icon"
-            :disabled="state !== 'CLIP_READY'"
-            @click="seekToFrame(frameIndex + 1)"
-          >▶</button>
           <span class="mono clip__frame">
-            frame <b>{{ frameIndex }}</b> / {{ lastFrame }}
-            <span class="faint">· {{ timeLabel }} · {{ meta?.fps }}fps</span>
+            <span><b>{{ frameIndex }}</b><span class="faint"> / {{ lastFrame }}</span></span>
+            <span class="faint">{{ timeLabel }} · {{ meta?.fps }}fps</span>
           </span>
         </div>
 
-        <div class="clip__coords">
+        <div class="strip clip__coords">
           <span class="faint mono">{{ scaleLabel }}</span>
           <div style="flex: 1" />
-          <span v-if="clip?.timing" class="faint clip__timing">
-            기준: 서버 접수 시각 · HLS/센서 시계 대응 미확인
-          </span>
           <span v-if="sourceBox" class="mono clip__bbox">
-            bbox [{{ Math.round(sourceBox.x) }}, {{ Math.round(sourceBox.y) }},
-            {{ Math.round(sourceBox.width) }}, {{ Math.round(sourceBox.height) }}]
+            <span class="faint">bbox</span>
+            {{ Math.round(sourceBox.x) }}, {{ Math.round(sourceBox.y) }},
+            {{ Math.round(sourceBox.width) }}×{{ Math.round(sourceBox.height) }}
           </span>
-          <span v-else-if="state === 'CLIP_READY'" class="faint">드래그해서 박스 지정</span>
+          <span v-else-if="state === 'CLIP_READY'" class="dim">멈춘 화면에서 대상을 클릭하세요 (드래그로 크기 지정)</span>
         </div>
 
-        <div class="clip__actions">
+        <div class="strip clip__actions">
           <p v-if="clip?.timing?.shortenedByGap" class="clip__error-text">
             원본 영상이 끊겨 연속 구간 {{ (meta.durationMs / 1000).toFixed(1) }}초만 저장했어요.
           </p>
@@ -446,10 +472,10 @@ const timeLabel = computed(() => {
               <span class="faint">frame {{ frameIndex }} ({{ timeLabel }})부터
                 {{ (intervalStartSeconds + analysisDurationSeconds).toFixed(2) }}s까지</span>
             </label>
-            <button class="clip__primary" :disabled="!canAnalyze" @click="requestAnalysis">
+            <button class="btn-primary" :disabled="!canAnalyze" @click="requestAnalysis">
               분석 요청
             </button>
-            <button v-if="sourceBox" @click="sourceBox = null">박스 지우기</button>
+            <button v-if="sourceBox" class="btn-ghost" @click="sourceBox = null">박스 지우기</button>
             <p v-if="requestError" class="clip__error-text">{{ requestError.message }}</p>
           </template>
 
@@ -462,10 +488,11 @@ const timeLabel = computed(() => {
           </template>
 
           <template v-else-if="state === 'DONE' && trackPoints">
-            <button @click="showOverlay = !showOverlay">
-              {{ showOverlay ? '지정 박스 보기' : '추적 오버레이 보기' }}
-            </button>
-            <a v-if="clip.analysis.trackSequenceUrl" :href="clip.analysis.trackSequenceUrl" download>
+            <div class="seg-toggle">
+              <button :class="{ on: showOverlay }" @click="showOverlay = true">추적 오버레이</button>
+              <button :class="{ on: !showOverlay }" @click="showOverlay = false">지정 박스</button>
+            </div>
+<a v-if="clip.analysis.trackSequenceUrl" :href="clip.analysis.trackSequenceUrl" download>
               TrackSequence 다운로드
             </a>
             <a v-if="clip.analysis.overlayUrl" :href="clip.analysis.overlayUrl" download>
@@ -481,9 +508,6 @@ const timeLabel = computed(() => {
           </template>
         </div>
 
-        <p v-if="state === 'CLIP_READY' || state === 'DONE'" class="faint">
-          새·드론의 비행 영역을 선택해 주세요. 분류 모델은 배경이나 다른 사물인지 확인하지 않습니다.
-        </p>
         <AnalysisResult v-if="state === 'DONE'" :analysis="clip.analysis" @redraw="redraw" />
         <p v-if="state === 'DONE'" class="faint">사용한 추적 방식: {{ trackerLabel(clip.analysis?.request?.trackerVariant) }}</p>
       </template>
@@ -492,7 +516,7 @@ const timeLabel = computed(() => {
 </template>
 
 <style scoped>
-.clip__id { font-size: 11px; }
+.clip__id { font-size: 12px; }
 .clip__timing { font-size: 11px; }
 .clip__interval { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .clip__interval input { width: 76px; }
@@ -510,17 +534,19 @@ const timeLabel = computed(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   text-align: center;
   padding: 24px;
 }
 .clip__empty p, .clip__pending p { margin: 0; }
-.clip__pending-spinner { width: 26px; height: 26px; }
+.clip__empty p:first-child { font-weight: 600; }
+.clip__empty .faint { max-width: 280px; font-size: 12px; }
+.clip__key { color: var(--accent-text); font-weight: 600; }
+
 .clip__progress {
-  width: min(280px, 70%);
-  height: 4px;
-  background: var(--border);
-  border-radius: 999px;
+  width: min(260px, 70%);
+  height: 2px;
+  background: var(--border-strong);
   overflow: hidden;
 }
 .clip__progress-bar {
@@ -528,13 +554,13 @@ const timeLabel = computed(() => {
   background: var(--accent);
   transition: width 240ms linear;
 }
-.clip__error-text { color: var(--danger); margin: 0; font-size: 13px; }
+.clip__error-text { color: var(--danger); margin: 0; font-size: 12px; }
 
 .clip__stage {
   position: relative;
   flex: 1;
   min-height: 160px;
-  background: #05080c;
+  background: var(--bg-video);
   overflow: hidden;
 }
 .clip__video {
@@ -546,46 +572,21 @@ const timeLabel = computed(() => {
   display: block;
 }
 
-.clip__scrub {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-}
-.clip__icon { padding: 4px 10px; min-width: 34px; }
-.clip__range { flex: 1; accent-color: var(--accent); width: auto; }
-.clip__frame { font-size: 12px; white-space: nowrap; }
+.clip__scrub { gap: 2px; padding: 0 12px 0 6px; }
+.clip__range { flex: 1; width: auto; margin: 0 10px; }
+.clip__frame { font-size: 12px; white-space: nowrap; display: flex; gap: 10px; }
 
-.clip__coords {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
-  font-size: 12px;
-  border-top: 1px solid var(--border);
-  min-height: 30px;
-}
-.clip__bbox { color: var(--accent); }
+.clip__coords { min-height: 32px; font-size: 12px; gap: 10px; }
+.clip__bbox { color: var(--accent-text); }
 
-.clip__actions {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
-}
+.clip__actions { padding: 9px 14px; flex-wrap: wrap; gap: 8px; }
 .clip__actions:empty { display: none; }
 .clip__actions p { margin: 0; font-size: 12px; }
-.clip__primary {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-.clip__primary:hover:not(:disabled) { background: #2a6396; }
-.clip__analyzing { display: flex; align-items: center; gap: 10px; }
+.clip__analyzing { display: flex; align-items: center; gap: 10px; font-size: 12px; height: 30px; }
+
+/* 결과 뒤 보기 전환 */
+.seg-toggle { display: flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+.seg-toggle button { border: none; border-radius: 0; height: 28px; color: var(--text-dim); }
+.seg-toggle button + button { border-left: 1px solid var(--border-strong); }
+.seg-toggle button.on { background: var(--bg-elevated); color: var(--text); font-weight: 600; }
 </style>

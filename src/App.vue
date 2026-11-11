@@ -9,7 +9,7 @@
  * 라우터 라이브러리를 쓰지 않는 이유는 그대로다. 화면 사이에 공유할 상태도, 중첩
  * 라우트도, 경로 파라미터도 없다. 해시 하나면 충분하다.
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useAuth } from './composables/useAuth.js'
 import LoginView from './components/LoginView.vue'
 import AppShell from './components/AppShell.vue'
@@ -40,6 +40,27 @@ function changeView(key) {
   location.hash = `#/${key}`
 }
 
+/**
+ * 로그인해도 바로 안으로 들어가지 않는다. 시작 화면에서 파트를 고른 뒤에야 들어간다.
+ * 새로고침했을 때는 주소에 파트가 있으면(이미 안에 있던 것) 그대로 안으로 간다.
+ * 로그아웃하면 다시 시작 화면으로 돌아가고 주소의 파트도 지운다.
+ */
+const entered = ref(/^#\/?(live|upload|history)/.test(location.hash))
+
+function enter(key) {
+  changeView(key)
+  entered.value = true
+}
+
+function goHome() {
+  entered.value = false
+  history.replaceState(null, '', location.pathname + location.search)
+}
+
+watch(user, (value) => {
+  if (!value) goHome()
+})
+
 const currentView = computed(() => VIEWS[view.value])
 
 onMounted(() => {
@@ -57,9 +78,9 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
     <span class="dim">세션 확인 중</span>
   </div>
 
-  <LoginView v-else-if="!user" />
+  <LoginView v-else-if="!user || !entered" @enter="enter" />
 
-  <AppShell v-else :view="view" @change="changeView">
+  <AppShell v-else :view="view" @change="changeView" @home="goHome">
     <component :is="currentView" />
   </AppShell>
 </template>

@@ -7,10 +7,12 @@
  * 없는 걸 있는 것처럼 보이면 나중에 "기록이 왜 사라졌지"가 된다.
  */
 import { ref, computed, watch, onMounted } from 'vue'
+import Icon from './Icon.vue'
 import { listHistory, removeHistory, clearHistory } from '../lib/historyStore.js'
 import { modelLabel } from '../lib/aiModel.js'
 import { trackerLabel } from '../lib/trackerProfiles.js'
 import DecisionEvidence from './DecisionEvidence.vue'
+import RadarEmpty from './RadarEmpty.vue'
 
 const entries = ref([])
 const selectedId = ref(null)
@@ -132,9 +134,9 @@ const tuningRows = computed(() => {
     <section class="panel">
       <div class="panel__head">
         <span class="panel__title">검출 기록</span>
-        <span class="faint">{{ counts.all }}건</span>
+        <span class="faint mono">{{ counts.all }}</span>
         <div style="flex: 1" />
-        <button class="history__clear" :disabled="!entries.length" @click="onClearAll">전체 삭제</button>
+        <button class="btn-ghost btn-sm" :disabled="!entries.length" @click="onClearAll">전체 삭제</button>
       </div>
 
       <div class="history__filters">
@@ -146,20 +148,21 @@ const tuningRows = computed(() => {
           @click="filter = key"
         >
           {{ key === 'all' ? '전체' : LABEL[key].text }}
-          <span class="faint">{{ counts[key] }}</span>
+          <span class="mono history__count">{{ counts[key] }}</span>
         </button>
       </div>
 
       <div class="panel__body history__list">
-        <p v-if="!visible.length" class="faint history__empty">
-          {{ entries.length ? '해당 결과가 없습니다' : '아직 기록이 없습니다' }}
-        </p>
+        <RadarEmpty v-if="!visible.length" :size="112">
+          <p class="radar-empty__title">{{ entries.length ? '해당 결과가 없습니다' : '아직 기록이 없습니다' }}</p>
+          <p class="faint">분석을 마친 클립과 업로드 영상이 판정과 함께 여기에 쌓입니다.</p>
+        </RadarEmpty>
 
         <button
           v-for="entry in visible"
           :key="entry.id"
           class="card"
-          :class="{ 'card--active': entry.id === selectedId }"
+          :class="['card--' + labelOf(entry).tone, { 'card--active': entry.id === selectedId }]"
           @click="selectedId = entry.id"
         >
           <div class="card__thumb">
@@ -169,18 +172,16 @@ const tuningRows = computed(() => {
 
           <div class="card__body">
             <div class="card__top">
-              <span class="badge" :class="'badge--' + labelOf(entry).tone">
-                <span class="dot" />{{ labelOf(entry).text }}
-              </span>
+              <span class="card__label">{{ labelOf(entry).text }}</span>
               <span class="mono card__conf">{{ confidenceOf(entry) }}</span>
               <div style="flex: 1" />
-              <span class="badge card__source">{{ SOURCE[entry.source] || entry.source }}</span>
+              <span class="card__source">{{ SOURCE[entry.source] || entry.source }}</span>
             </div>
             <div class="card__title">{{ entry.title }}</div>
             <div class="faint mono card__time">{{ timeOf(entry.createdAt) }}</div>
           </div>
 
-          <span class="card__remove" title="삭제" @click.stop="onRemove(entry.id)">✕</span>
+          <span class="card__remove" title="삭제" @click.stop="onRemove(entry.id)"><Icon name="close" :size="12" /></span>
         </button>
       </div>
     </section>
@@ -192,10 +193,15 @@ const tuningRows = computed(() => {
         <span v-if="selected" class="badge" :class="'badge--' + labelOf(selected).tone">
           <span class="dot" />{{ labelOf(selected).text }}
         </span>
+        <div style="flex: 1" />
+        <span v-if="selected" class="faint mono">{{ timeOf(selected.createdAt) }}</span>
       </div>
 
       <div class="panel__body history__detail">
-        <p v-if="!selected" class="faint history__empty">왼쪽에서 기록을 선택하세요</p>
+        <RadarEmpty v-if="!selected" :size="112">
+          <p class="radar-empty__title">기록을 선택하세요</p>
+          <p class="faint">왼쪽 목록에서 하나를 고르면 판정 근거와 궤적이 여기에 열립니다.</p>
+        </RadarEmpty>
 
         <template v-else>
           <div class="detail__media">
@@ -203,15 +209,15 @@ const tuningRows = computed(() => {
             <p v-else class="faint detail__nomedia">남은 화면이 없습니다</p>
           </div>
           <p v-if="selected.overlayUrl" class="detail__note">
-            <a :href="selected.overlayUrl" download>오버레이 내려받기</a>
+            <a :href="selected.overlayUrl" download><Icon name="download" :size="12" />오버레이 내려받기</a>
           </p>
 
-          <p v-if="(selected.featureReasons || []).length" class="detail__reason detail__reason--feature">
+          <p v-if="(selected.featureReasons || []).length" class="note note--muted">
             <b>피처 단계</b> ·
             {{ selected.featureReasons.map((c) => FEATURE_REASON[c] || c).join(' / ') }}
           </p>
 
-          <p v-if="selected.rejectReason" class="detail__reason">
+          <p v-if="selected.rejectReason" class="note">
             <b>사유</b> · {{ REJECT_REASON[selected.rejectReason] || selected.rejectReason }}
             <span class="faint mono">({{ selected.rejectReason }})</span>
           </p>
@@ -220,7 +226,7 @@ const tuningRows = computed(() => {
             class="detail__toggle"
             :aria-expanded="showEvidence"
             @click="showEvidence = !showEvidence"
-          >판단 근거 {{ showEvidence ? '▴' : '▾' }}</button>
+          >판단 근거 <Icon :name="showEvidence ? 'up' : 'down'" :size="12" /></button>
           <DecisionEvidence v-if="showEvidence" :analysis="selected" />
 
           <dl class="detail__grid">
@@ -241,7 +247,7 @@ const tuningRows = computed(() => {
           </dl>
 
           <template v-if="selected.quality">
-            <div class="detail__section faint">트랙 품질</div>
+            <div class="detail__section eyebrow">트랙 품질</div>
             <dl class="detail__grid">
               <dt class="faint">추적 프레임</dt>
               <dd class="mono">{{ selected.quality.numPoints }}</dd>
@@ -255,7 +261,7 @@ const tuningRows = computed(() => {
           </template>
 
           <template v-if="tuningRows.length">
-            <div class="detail__section faint">추적 설정</div>
+            <div class="detail__section eyebrow">추적 설정</div>
             <dl class="detail__grid">
               <template v-for="[name, value] in tuningRows" :key="name">
                 <dt class="faint">{{ name }}</dt>
@@ -265,13 +271,13 @@ const tuningRows = computed(() => {
           </template>
 
           <template v-if="selected.topFeatures">
-            <div class="detail__section faint">주요 특징</div>
+            <div class="detail__section eyebrow">주요 특징</div>
             <div class="detail__features">
               <span
                 v-for="(weight, name) in selected.topFeatures"
                 :key="name"
-                class="badge mono detail__feature"
-              >{{ name }} {{ Number(weight).toFixed(2) }}</span>
+                class="mono detail__feature"
+              >{{ name }} <b>{{ Number(weight).toFixed(2) }}</b></span>
             </div>
           </template>
         </template>
@@ -287,110 +293,130 @@ const tuningRows = computed(() => {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(340px, 2fr) minmax(0, 3fr);
-  gap: 12px;
+  gap: var(--gap);
 }
-.history__clear { padding: 3px 10px; font-size: 11px; }
 
+/* 판정별 거르기. 탭처럼 아래 선으로 선택을 표시한다. */
 .history__filters {
   display: flex;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 2px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--border);
   flex: none;
 }
 .history__filter {
-  padding: 4px 10px;
-  font-size: 11px;
-  display: flex;
+  height: 34px;
+  padding: 0 8px;
   gap: 6px;
-  background: transparent;
-  border-color: var(--border);
+  border: none;
+  border-radius: 0;
+  color: var(--text-dim);
+  position: relative;
 }
-.history__filter--on { border-color: var(--accent); background: var(--accent-dim); }
+.history__filter:hover:not(:disabled) { background: transparent; color: var(--text); }
+.history__filter--on { color: var(--text); font-weight: 600; }
+.history__filter--on::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--text);
+}
+.history__count { font-size: 12px; color: var(--text-faint); }
 
-.history__list { overflow-y: auto; gap: 8px; padding: 10px; }
+.history__list { overflow-y: auto; }
 .history__empty { margin: auto; font-size: 12px; }
 
+/* 기록 한 줄. 카드 대신 목록 행으로 두고 판정 색은 왼쪽 선으로만 쓴다. */
 .card {
   display: flex;
   align-items: stretch;
-  gap: 10px;
-  padding: 8px;
+  gap: 12px;
+  height: auto;
+  padding: 10px 14px 10px 12px;
   text-align: left;
   width: 100%;
   flex: none;
   position: relative;
+  border: none;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  justify-content: flex-start;
 }
-.card--active { border-color: var(--accent); background: var(--accent-dim); }
+.card:hover:not(:disabled) { border-color: transparent; border-bottom-color: var(--border); }
+.card--active,
+.card--active:hover:not(:disabled) { background: var(--bg-hover); border-left-color: var(--text-dim); }
+.card--ok .card__label { color: var(--bird); }
+.card--error .card__label { color: var(--drone); }
+.card--warn .card__label { color: var(--uncertain); }
 .card__thumb {
-  width: 92px;
+  width: 96px;
   height: 56px;
   flex: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  background: #05080c;
+  background: var(--bg-video);
   display: grid;
   place-items: center;
 }
 .card__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.card__top { display: flex; align-items: center; gap: 7px; }
-.card__conf { font-size: 12px; }
-.card__source { font-size: 10px; padding: 2px 7px; }
+.card__top { display: flex; align-items: baseline; gap: 8px; padding-right: 20px; }
+.card__label { font-size: 13px; font-weight: 700; }
+.card__conf { font-size: 12px; color: var(--text-dim); }
+.card__source { font-size: 12px; color: var(--text-faint); }
 .card__title {
   font-size: 12px;
+  color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.card__time { font-size: 11px; }
+.card__time { font-size: 12px; }
 .card__remove {
   position: absolute;
-  top: 6px; right: 8px;
+  top: 8px;
+  right: 8px;
   color: var(--text-faint);
-  font-size: 11px;
-  padding: 2px 4px;
-  border-radius: 4px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  opacity: 0;
 }
-.card__remove:hover { color: var(--danger); }
+.card:hover .card__remove, .card--active .card__remove { opacity: 1; }
+.card__remove:hover { color: var(--text); background: var(--bg-hover); }
 
-.history__detail { overflow-y: auto; padding: 14px; gap: 12px; }
+.history__detail { overflow-y: auto; padding: 16px; gap: 14px; }
 .detail__media {
-  height: 320px;
-  background: #05080c;
-  border-radius: var(--radius);
+  height: 340px;
+  background: var(--bg-video);
   overflow: hidden;
   flex: none;
 }
 .detail__video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .detail__nomedia { display: grid; place-items: center; height: 100%; margin: 0; }
 .detail__note { font-size: 12px; margin: 0; }
+.detail__note a { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.detail__note a:hover { text-decoration: underline; }
 .detail__toggle { align-self: flex-start; }
-.detail__note a { color: var(--accent); }
 
-.detail__reason--feature { background: #23252b; color: var(--text-dim); }
-.detail__reason {
-  margin: 0;
-  padding: 9px 11px;
-  border-radius: var(--radius);
-  background: #2a2417;
-  color: var(--uncertain);
-  font-size: 13px;
-}
-
-.detail__section { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.detail__section { padding-top: 12px; border-top: 1px solid var(--border); }
 .detail__grid {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 16px;
+  grid-template-columns: 120px 1fr;
+  gap: 7px 16px;
   margin: 0;
   font-size: 12px;
 }
-.detail__grid dt { font-size: 11px; }
+.detail__grid dt { font-size: 12px; }
 .detail__grid dd { margin: 0; }
 
-.detail__features { display: flex; gap: 6px; flex-wrap: wrap; }
-.detail__feature { font-size: 11px; }
+.detail__features { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; }
+.detail__feature { color: var(--text-dim); }
+.detail__feature b { color: var(--text); font-weight: 500; }
 
 @media (max-width: 1100px) {
   .history { grid-template-columns: minmax(0, 1fr); grid-auto-rows: min-content; }

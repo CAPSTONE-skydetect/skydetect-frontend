@@ -38,15 +38,18 @@ const session = useClipSession()
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--gap);
 }
 .console__right {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--gap);
   min-height: 0;
   min-width: 0;
 }
+/* 클립 패널이 남는 높이를 모두 갖고, 큐는 내용만큼만 차지한다. */
+.console__right > :first-child { flex: 1 1 auto; }
+.console__right > :last-child { flex: 0 0 auto; max-height: 40%; }
 
 /* 좁은 창에서 패널이 겹쳐 깨지지 않게 한다. 높이를 100% 로 묶은 채 세로로 쌓으면
    각 패널이 납작해져 영상이 거의 사라지므로, 높이 고정을 풀고 스크롤을 허용한다. */

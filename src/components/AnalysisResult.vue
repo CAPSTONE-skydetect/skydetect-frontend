@@ -13,6 +13,7 @@
  * 음수면 새 쪽이다. %로 바꾸면 확률로 오해하므로 부호 있는 점수 그대로 보여준다.
  */
 import { ref, computed, watch } from 'vue'
+import Icon from './Icon.vue'
 import { modelLabel } from '../lib/aiModel.js'
 import DecisionEvidence from './DecisionEvidence.vue'
 
@@ -123,23 +124,22 @@ const processingLabel = computed(() => {
 <template>
   <div class="result" :style="{ '--label-color': label.color }">
     <div class="result__head">
-      <span class="result__label">{{ label.text }}</span>
+      <div class="result__verdict">
+        <span class="eyebrow">판정</span>
+        <span class="result__label">{{ label.text }}</span>
+      </div>
 
       <div v-if="!isUncertain && isMiniRocket" class="result__conf">
-        <div class="result__conf-row">
-          <span class="dim">판정 점수</span>
-          <b class="mono">{{ scoreText }}</b>
-        </div>
+        <span class="eyebrow">판정 점수</span>
+        <b class="mono result__num">{{ scoreText }}</b>
         <span class="faint result__score-note">
           Ridge margin · 확률 아님<template v-if="analysis.windowsUsed"> · 2초 창 {{ analysis.windowsUsed }}개</template>
         </span>
       </div>
 
       <div v-else-if="!isUncertain" class="result__conf">
-        <div class="result__conf-row">
-          <span class="dim">신뢰도</span>
-          <b class="mono">{{ confidencePercent }}%</b>
-        </div>
+        <span class="eyebrow">신뢰도</span>
+        <b class="mono result__num">{{ confidencePercent }}<small>%</small></b>
         <div class="result__bar">
           <div class="result__bar-fill" :style="confidenceBarStyle" />
         </div>
@@ -147,49 +147,53 @@ const processingLabel = computed(() => {
 
       <div v-else class="result__conf">
         <!-- 0.0 을 0% 막대로 그리지 않는다. 점수 자체를 매기지 않은 것이다. -->
-        <span class="dim">분류 점수 없음</span>
+        <span class="eyebrow">신뢰도</span>
+        <span class="dim result__none">분류 점수 없음</span>
       </div>
 
       <div style="flex: 1" />
-      <span v-if="analysis.model" class="badge mono" :title="analysis.modelVersion || ''">
-        {{ modelLabel(analysis.model) }}
-      </span>
-      <button
-        class="result__toggle"
-        :class="{ 'result__toggle--on': showEvidence }"
-        :aria-expanded="showEvidence"
-        @click="showEvidence = !showEvidence"
-      >판단 근거 {{ showEvidence ? '▴' : '▾' }}</button>
-      <button @click="$emit('redraw')">다시 지정</button>
+
+      <div class="result__tools">
+        <span v-if="analysis.model" class="badge mono" :title="analysis.modelVersion || ''">
+          {{ modelLabel(analysis.model) }}
+        </span>
+        <button
+          class="result__toggle"
+          :class="{ 'result__toggle--on': showEvidence }"
+          :aria-expanded="showEvidence"
+          @click="showEvidence = !showEvidence"
+        >판단 근거 <Icon :name="showEvidence ? 'up' : 'down'" :size="12" /></button>
+        <button class="btn-ghost" @click="$emit('redraw')">다시 지정</button>
+      </div>
     </div>
 
-    <p v-if="reasonText" class="result__reason">
+    <p v-if="reasonText" class="note">
       <b>사유</b> · {{ reasonText }}
       <span class="faint mono">({{ analysis.rejectReason }})</span>
       <span v-if="analysis.rejectDetail" class="faint"> · {{ analysis.rejectDetail }}</span>
     </p>
 
-    <p v-if="featureReasonTexts.length" class="result__reason result__reason--feature">
+    <p v-if="featureReasonTexts.length" class="note note--muted">
       <b>피처 단계</b> · {{ featureReasonTexts.join(' / ') }}
       <span class="faint mono">({{ featureReasons.join(', ') }})</span>
     </p>
 
     <DecisionEvidence v-if="showEvidence" :analysis="analysis" />
 
-    <div class="result__meta">
-      <span v-if="processingLabel" class="faint">처리 {{ processingLabel }}</span>
+    <dl v-if="processingLabel || quality" class="result__meta">
+      <div v-if="processingLabel"><dt>처리</dt><dd class="mono">{{ processingLabel }}</dd></div>
       <template v-if="quality">
-        <span class="faint">추적 {{ quality.numPoints }}프레임</span>
-        <span class="faint">평균 신뢰도 {{ (quality.meanConf * 100).toFixed(0) }}%</span>
-        <span class="faint">트랙 품질 {{ STABILITY[quality.trackStability] || quality.trackStability }}</span>
-        <span v-if="quality.featureStatus" class="faint">특징 {{ FEATURE_STATUS[quality.featureStatus] || quality.featureStatus }}</span>
+        <div><dt>추적</dt><dd class="mono">{{ quality.numPoints }}프레임</dd></div>
+        <div><dt>평균 신뢰도</dt><dd class="mono">{{ (quality.meanConf * 100).toFixed(0) }}%</dd></div>
+        <div><dt>트랙 품질</dt><dd>{{ STABILITY[quality.trackStability] || quality.trackStability }}</dd></div>
+        <div v-if="quality.featureStatus"><dt>특징</dt><dd>{{ FEATURE_STATUS[quality.featureStatus] || quality.featureStatus }}</dd></div>
       </template>
-    </div>
+    </dl>
 
     <div v-if="topFeatures.length" class="result__features">
-      <span class="faint" title="이 궤적이 아니라 RF 모델 전체에서 많이 쓰는 피처">모델 전체 주요 특징</span>
-      <span v-for="[name, weight] in topFeatures" :key="name" class="badge mono result__feature">
-        {{ name }} {{ weight.toFixed(2) }}
+      <span class="eyebrow" title="이 궤적이 아니라 RF 모델 전체에서 많이 쓰는 피처">모델 전체 주요 특징</span>
+      <span v-for="[name, weight] in topFeatures" :key="name" class="mono result__feature">
+        {{ name }} <b>{{ weight.toFixed(2) }}</b>
       </span>
     </div>
   </div>
@@ -199,48 +203,56 @@ const processingLabel = computed(() => {
 .result {
   flex: none;
   padding: 14px;
-  border-top: 2px solid var(--label-color);
-  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  position: relative;
 }
-.result__head { display: flex; align-items: center; gap: 18px; }
+/* 판정 색은 왼쪽 세로 띠 하나로만 알린다. */
+.result::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 3px;
+  height: 46px;
+  background: var(--label-color);
+}
+
+.result__head { display: flex; align-items: flex-start; gap: 28px; flex-wrap: wrap; }
+.result__verdict { display: flex; flex-direction: column; gap: 4px; }
 .result__label {
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
   color: var(--label-color);
-  line-height: 1;
+  line-height: 1.05;
 }
-.result__conf { min-width: 150px; display: flex; flex-direction: column; gap: 5px; }
-.result__conf-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
-.result__score-note { font-size: 11px; }
-.result__toggle--on { border-color: var(--accent); color: var(--text); }
-.result__bar {
-  height: 5px;
-  background: var(--border);
-  border-radius: 999px;
-  overflow: hidden;
-}
+.result__conf { min-width: 140px; display: flex; flex-direction: column; gap: 4px; }
+.result__num { font-size: 20px; font-weight: 600; line-height: 1.2; }
+.result__num small { font-size: 12px; color: var(--text-dim); margin-left: 1px; }
+.result__none { font-size: 13px; line-height: 1.9; }
+.result__score-note { font-size: 12px; }
+.result__bar { height: 2px; background: var(--border-strong); margin-top: 2px; }
 .result__bar-fill { height: 100%; transition: width 300ms ease; }
 
-.result__reason--feature { background: #23252b; color: var(--text-dim); }
-.result__reason {
-  margin: 0;
-  padding: 9px 11px;
-  border-radius: var(--radius);
-  background: #2a2417;
-  color: var(--uncertain);
-  font-size: 13px;
-}
+.result__tools { display: flex; align-items: center; gap: 6px; align-self: center; }
+.result__toggle--on { border-color: var(--text-dim); background: var(--bg-elevated); }
 
 .result__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 6px 22px;
+  margin: 0;
   font-size: 12px;
 }
-.result__features { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
-.result__feature { font-size: 11px; }
+.result__meta > div { display: flex; gap: 6px; align-items: baseline; }
+.result__meta dt { color: var(--text-faint); font-size: 12px; }
+.result__meta dd { margin: 0; }
+
+.result__features { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+.result__feature { color: var(--text-dim); }
+.result__feature b { color: var(--text); font-weight: 500; }
 </style>

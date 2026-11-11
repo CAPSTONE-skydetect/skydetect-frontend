@@ -207,36 +207,36 @@ function formatValue(value) {
   gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
+  border-radius: var(--radius);
+  background: var(--bg);
 }
 .evidence__formula { margin: 0; font-size: 13px; font-weight: 600; }
 .evidence__verdict { margin: 0; font-size: 12px; }
-.evidence__note, .evidence__empty { margin: 0; font-size: 11px; line-height: 1.5; }
-.evidence__legend { display: flex; justify-content: space-between; font-size: 11px; padding-left: 210px; padding-right: 56px; }
+.evidence__note, .evidence__empty { margin: 0; font-size: 12px; line-height: 1.5; }
+.evidence__legend { display: flex; justify-content: space-between; font-size: 12px; padding-left: 210px; padding-right: 56px; }
 
 .rf { display: flex; flex-direction: column; gap: 4px; }
 .rf__row { display: grid; grid-template-columns: 120px 80px 1fr 56px; align-items: center; gap: 10px; font-size: 12px; }
 .rf__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rf__value { text-align: right; font-size: 11px; }
-.rf__num { text-align: right; font-size: 11px; }
+.rf__value { text-align: right; font-size: 12px; }
+.rf__num { text-align: right; font-size: 12px; }
 .rf__bar { display: flex; height: 10px; }
 .rf__half { flex: 1; display: flex; }
 .rf__half--bird { justify-content: flex-end; border-right: 1px solid var(--border-strong); }
-.rf__fill { height: 100%; border-radius: 2px; }
+.rf__fill { height: 100%; border-radius: 1px; }
 .rf__fill--drone { background: var(--drone); }
 .rf__fill--bird { background: var(--bird); }
 
 .mr { display: flex; gap: 8px; }
-.mr__axis { display: flex; flex-direction: column; justify-content: space-between; font-size: 11px; padding: 18px 0 22px; }
+.mr__axis { display: flex; flex-direction: column; justify-content: space-between; font-size: 12px; padding: 18px 0 22px; }
 .mr__chart { flex: 1; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
 .mr__col { flex: 1; min-width: 44px; display: flex; flex-direction: column; align-items: stretch; }
-.mr__num { text-align: center; font-size: 10px; height: 16px; }
+.mr__num { text-align: center; font-size: 12px; height: 16px; }
 .mr__up, .mr__down { height: 46px; display: flex; justify-content: center; }
 .mr__up { align-items: flex-end; border-bottom: 1px solid var(--border-strong); }
 .mr__down { align-items: flex-start; }
-.mr__fill { width: 60%; border-radius: 2px; }
+.mr__fill { width: 60%; border-radius: 1px; }
 .mr__fill--drone { background: var(--drone); }
 .mr__fill--bird { background: var(--bird); }
-.mr__label { text-align: center; font-size: 10px; margin-top: 4px; white-space: nowrap; }
+.mr__label { text-align: center; font-size: 12px; margin-top: 4px; white-space: nowrap; }
 </style>

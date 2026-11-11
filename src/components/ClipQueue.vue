@@ -8,6 +8,7 @@
  * 띄울지는 사용자가 고른다. 끝난 클립은 결과 라벨을 달고 남아 이력 역할도 한다.
  */
 import { computed } from 'vue'
+import Icon from './Icon.vue'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -47,21 +48,23 @@ function timeOf(clip) {
   <section class="panel queue">
     <div class="panel__head">
       <span class="panel__title">클립 큐</span>
-      <span class="faint">{{ clips.length }}건</span>
-      <div style="flex: 1" />
+      <span class="faint mono">{{ clips.length }}</span>
     </div>
 
     <div class="queue__list">
-      <p v-if="!clips.length" class="faint queue__empty">비어 있음</p>
+      <p v-if="!clips.length" class="faint queue__empty">검출한 구간이 여기에 쌓입니다</p>
 
       <button
         v-for="clip in clips"
         :key="clip.clipId"
         class="queue__item"
-        :class="{ 'queue__item--active': clip.clipId === session.selectedClipId.value }"
+        :class="[
+          'queue__item--' + statusOf(clip).tone,
+          { 'queue__item--active': clip.clipId === session.selectedClipId.value },
+        ]"
         @click="session.select(clip.clipId)"
       >
-        <span class="badge" :class="'badge--' + statusOf(clip).tone">
+        <span class="queue__status">
           <span class="dot" :class="{ 'dot--pulse': statusOf(clip).pulse }" />
           {{ statusOf(clip).text }}
         </span>
@@ -70,7 +73,7 @@ function timeOf(clip) {
           class="queue__dismiss"
           title="큐에서 제거"
           @click.stop="session.dismiss(clip.clipId)"
-        >✕</span>
+        ><Icon name="close" :size="12" /></span>
       </button>
     </div>
   </section>
@@ -78,33 +81,42 @@ function timeOf(clip) {
 
 <style scoped>
 .queue { flex: none; }
-.queue__hint { font-size: 11px; }
 .queue__list {
   display: flex;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 10px 14px;
   overflow-x: auto;
-  min-height: 58px;
+  min-height: 56px;
   align-items: center;
 }
 .queue__empty { margin: 0; font-size: 12px; }
+
+/* 상태 색은 왼쪽 2px 선과 글자에만 쓴다. */
 .queue__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  white-space: nowrap;
+  height: 34px;
+  gap: 10px;
+  padding: 0 6px 0 10px;
   flex: none;
+  border-color: var(--border);
+  border-left: 2px solid var(--text-faint);
+  background: var(--bg);
 }
-.queue__item--active {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-}
-.queue__time { font-size: 11px; color: var(--text-faint); }
+.queue__item--ok { border-left-color: var(--bird); }
+.queue__item--warn { border-left-color: var(--uncertain); }
+.queue__item--error { border-left-color: var(--drone); }
+.queue__item--active,
+.queue__item--active:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--text-dim); }
+.queue__item--ok .queue__status { color: var(--bird); }
+.queue__item--warn .queue__status { color: var(--uncertain); }
+.queue__item--error .queue__status { color: var(--drone); }
+
+.queue__status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.queue__time { font-size: 12px; color: var(--text-faint); }
 .queue__dismiss {
   color: var(--text-faint);
-  padding: 0 2px;
-  border-radius: 4px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
 }
-.queue__dismiss:hover { color: var(--danger); }
+.queue__dismiss:hover { color: var(--text); background: var(--bg-hover); }
 </style>
