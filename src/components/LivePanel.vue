@@ -9,7 +9,8 @@
 import { ref, computed } from 'vue'
 import { useHls } from '../composables/useHls.js'
 import { useWebRtc } from '../composables/useWebRtc.js'
-import { HLS_URL, WHEP_URL } from '../api/config.js'
+import { HLS_URL, WHEP_URL, DEVICE_RECONNECT_URL } from '../api/config.js'
+import { http } from '../api/http.js'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -26,7 +27,20 @@ const error = computed(() => (isWebRtc.value ? rtc : hls).error.value)
 const engine = computed(() => isWebRtc.value ? 'WebRTC' : hls.engine.value)
 const { fastMode, liveDelay, stalls, goLive, toggleFastMode } = hls
 const rtcStats = rtc.stats
-const retry = () => (isWebRtc.value ? rtc : hls).retry()
+const reconnecting = ref(false)
+const reconnectError = ref(null)
+async function retry() {
+  if (reconnecting.value) return
+  reconnecting.value = true
+  reconnectError.value = null
+  try {
+    if (DEVICE_RECONNECT_URL) await http.post(DEVICE_RECONNECT_URL)
+    const player = isWebRtc.value ? rtc : hls
+    player.retry()
+  } catch (error) {
+    reconnectError.value = error.message
+  } finally { reconnecting.value = false }
+}
 const resume = () => (isWebRtc.value ? rtc : hls).resume()
 
 async function onTrigger() {
@@ -62,6 +76,9 @@ async function onTrigger() {
       </span>
 
       <div style="flex: 1" />
+      <button v-if="DEVICE_RECONNECT_URL" :disabled="reconnecting" @click="retry">
+        {{ reconnecting ? '파이 연결 확인 중…' : '파이 연결 확인' }}
+      </button>
       <span v-if="!isWebRtc" class="faint live__engine" title="hls.js가 추정한 라이브 끝과 재생 위치의 차이입니다. 카메라 촬영부터 화면까지의 전체 지연은 아닙니다.">
         재생 지연 {{ liveDelay === null ? '측정 대기' : `${liveDelay.toFixed(2)}초` }} · 버퍼 멈춤 {{ stalls }}회
       </span>
@@ -77,6 +94,7 @@ async function onTrigger() {
     </div>
 
     <div class="panel__body">
+      <p v-if="reconnectError" class="live__error" role="alert">{{ reconnectError }}</p>
       <div class="live__stage">
         <!-- muted 가 없으면 브라우저 자동재생 정책에 막힌다. 관제 영상에 소리는 필요 없다. -->
         <video ref="videoEl" class="live__video" muted playsinline loop autoplay />

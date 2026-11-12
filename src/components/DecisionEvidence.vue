@@ -78,20 +78,22 @@ const rfVerdict = computed(() => {
 const windows = computed(() => {
   const scores = props.analysis.windowScores || []
   const starts = props.analysis.windowStartsS || []
-  const offset = props.analysis.trackStartS || 0
-  const maxAbs = Math.max(...scores.map((s) => Math.abs(s)), 1e-9)
-  return scores.map((score, i) => {
-    const start = starts[i] != null ? offset + starts[i] : null
-    return {
+  const offset = props.analysis.trackStartS
+  const maxAbs = Math.max(...scores.filter(Number.isFinite).map((s) => Math.abs(s)), 1e-9)
+  return scores.flatMap((score, i) => {
+    if (!Number.isFinite(score)) return []
+    const start = Number.isFinite(offset) && Number.isFinite(starts[i]) ? offset + starts[i] : null
+    return [{
       score,
       height: (Math.abs(score) / maxAbs) * 100,
       label: start != null ? `${start.toFixed(1)}–${(start + 2).toFixed(1)}초` : `창 ${i + 1}`,
-    }
+    }]
   })
 })
 
-const droneWindows = computed(() => windows.value.filter((w) => w.score >= 0).length)
-const birdWindows = computed(() => windows.value.length - droneWindows.value)
+const droneWindows = computed(() => windows.value.filter((w) => w.score > 0).length)
+const birdWindows = computed(() => windows.value.filter((w) => w.score < 0).length)
+const neutralWindows = computed(() => windows.value.filter((w) => w.score === 0).length)
 
 const rejectionText = computed(() => {
   const r = props.analysis.windowRejections || {}
@@ -163,7 +165,9 @@ function formatValue(value) {
     <!-- MiniRocket -------------------------------------------------------->
     <template v-else>
       <p v-if="!windows.length" class="faint evidence__empty">
-        판정에 쓸 2초 창이 없습니다.<template v-if="rejectionText"> 제외된 창: {{ rejectionText }}</template>
+        <template v-if="analysis.windowsUsed === 0">판정에 쓸 2초 창이 없습니다.</template>
+        <template v-else>이 결과에는 구간별 점수 정보가 없습니다.</template>
+        <template v-if="rejectionText"> 제외된 창: {{ rejectionText }}</template>
       </p>
 
       <template v-else>
@@ -173,7 +177,9 @@ function formatValue(value) {
         </p>
         <p class="evidence__verdict">
           드론 쪽 창 {{ droneWindows }}개, 새 쪽 창 {{ birdWindows }}개.
-          평균이 {{ (analysis.decisionScore ?? 0) >= 0 ? '양수라 드론' : '음수라 새' }}(으)로 판정했습니다.
+          <template v-if="neutralWindows">경계 창 {{ neutralWindows }}개.</template>
+          <template v-if="analysis.label === 'uncertain'">서버의 보류 기준에 따라 최종 판정을 보류했습니다.</template>
+          <template v-else>최종 판정은 {{ analysis.label === 'drone' ? '드론' : '새' }}입니다. 점수 평균으로 결정하며 다수결이 아닙니다.</template>
         </p>
 
         <div class="mr">

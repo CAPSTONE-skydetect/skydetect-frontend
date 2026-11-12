@@ -159,7 +159,7 @@ const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
 .login {
   height: 100%;
   display: grid;
-  grid-template-columns: minmax(480px, 8fr) 5fr;
+  grid-template-columns: minmax(480px, 8fr) minmax(0, 5fr);
 }
 
 /* 왼쪽: 위 줄은 고정, 아래 글은 스크롤. */
@@ -202,13 +202,20 @@ const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
 
 /* 오른쪽: 로그인 / 파트 선택 */
 .login__main {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   padding: 24px;
 }
 .login__form {
   width: 100%;
   max-width: 340px;
+  min-width: 0;
+  flex: none;
+  margin-block: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -220,14 +227,23 @@ const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
 .login__submit { height: 40px; margin-top: 4px; font-size: 13px; }
 .login__spinner { border-color: rgba(8, 20, 42, 0.3); border-top-color: var(--on-accent); }
 
-.login__choose { gap: 10px; }
+.login__choose {
+  /* Keep intrinsic card heights in flow instead of shrinking a nested flex item. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 440px;
+  gap: 10px;
+}
 .login__who { margin: 0; font-size: 12px; color: var(--text-faint); }
 .login__who b { color: var(--text); font-weight: 600; }
 
-.login__choose { max-width: 440px; }
-.parts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.parts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .part {
+  -webkit-appearance: none;
+  appearance: none;
   position: relative;
+  width: 100%;
+  min-width: 0;
   height: auto;
   aspect-ratio: 1 / 1;
   padding: 18px;
@@ -242,8 +258,8 @@ const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
   background: var(--bg-panel);
   color: var(--text);
 }
-.part__icon { color: var(--text); }
-.part__body { display: flex; flex-direction: column; gap: 6px; padding-right: 8px; }
+.part__icon { color: var(--text); flex: none; }
+.part__body { display: flex; flex-direction: column; min-width: 0; max-width: 100%; overflow-wrap: anywhere; gap: 6px; padding-right: 8px; }
 .part__body strong { font-size: 15px; font-weight: 600; }
 .part__body span { font-size: 12px; line-height: 1.5; color: var(--text-dim); font-weight: 400; }
 .part__arrow { position: absolute; right: 16px; top: 16px; color: var(--text-faint); }
@@ -260,10 +276,28 @@ const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
 }
 .part--row strong { font-size: 13px; font-weight: 500; }
 .part--row .part__arrow { position: static; margin-left: auto; }
-.login__signout { align-self: flex-start; margin-top: 8px; }
+.login__signout { justify-self: start; margin-top: 8px; }
 
 @media (max-width: 800px) {
-  .login { grid-template-columns: 1fr; }
-  .login__side { display: none; }
+  .login {
+    height: auto;
+    min-height: 100%;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .login__main {
+    grid-row: 1;
+    min-height: 100svh;
+    overflow: visible;
+  }
+  .login__side {
+    grid-row: 2;
+    min-width: 0;
+    border-right: 0;
+    border-top: 1px solid var(--border);
+  }
+  /* Use page scrolling below the entry panel, not a nested guide scroller. */
+  .login__scroll { flex: none; overflow: visible; }
+  .login__top { padding-inline: 24px; }
+  .login__inner { padding-inline: 24px; }
 }
 </style>

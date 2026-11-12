@@ -25,15 +25,25 @@ import { addHistory, evidenceOf } from '../lib/historyStore.js'
 import { aiModel } from '../lib/aiModel.js'
 import TrackerProfileSelect from './TrackerProfileSelect.vue'
 import { trackerLabel } from '../lib/trackerProfiles.js'
+import { clipPreparation } from '../lib/clipPreparation.js'
+import { bindSelectionDismiss } from '../lib/selectionDismiss.js'
+import { useEvidencePlayback } from '../composables/useEvidencePlayback.js'
 
 const props = defineProps({
   session: { type: Object, required: true },
 })
 
 const videoEl = ref(null)
+const evidencePlayback = useEvidencePlayback(videoEl)
 const sourceBox = ref(null)     // 원본 픽셀 좌표 {x, y, width, height}
+const selectionMode = ref(false)
+const selectionStage = ref(null)
+const selectionButton = ref(null)
+const roiFrame = ref(null)
+let selectionSnapshot = null
+let removeSelectionDismiss = null
 const frameIndex = ref(0)
-const analysisDurationSeconds = ref(13)
+const analysisDurationSeconds = ref(10)
 const trackerVariant = ref('d0')
 const playing = ref(false)
 const now = ref(Date.now())
@@ -57,12 +67,16 @@ const meta = computed(() => clip.value?.meta || null)
 
 /** 클립이 바뀌면 그려둔 박스와 프레임 위치를 반드시 버린다. */
 watch(() => clip.value?.clipId, () => {
+  evidencePlayback.stop()
+  selectionMode.value = false
+  selectionSnapshot = null
+  roiFrame.value = null
   sourceBox.value = null
   frameIndex.value = 0
   playing.value = false
   requestError.value = null
   showOverlay.value = false
-  analysisDurationSeconds.value = Math.min(13, (clip.value?.meta?.durationMs || 13000) / 1000)
+  analysisDurationSeconds.value = Math.min(10, (clip.value?.meta?.durationMs || 13000) / 1000)
 })
 
 /**
@@ -105,6 +119,7 @@ let lastRequestedBbox = null
 
 const ticker = setInterval(() => { now.value = Date.now() }, 250)
 onBeforeUnmount(() => clearInterval(ticker))
+const preparation = computed(() => clipPreparation(props.session.clips.value, now.value))
 
 /** readyAt 은 서버가 준 값이다. 클라이언트에서 10초를 직접 세면 시계가 틀어진다. */
 const remainingSeconds = computed(() => {
@@ -161,8 +176,47 @@ function onResize() {
   geometryVersion.value += 1
 }
 
-onMounted(() => window.addEventListener('resize', onResize))
-onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  removeSelectionDismiss = bindSelectionDismiss(window, {
+    isActive: () => selectionMode.value,
+    roots: () => [selectionStage.value, selectionButton.value],
+    cancel: cancelSelection,
+  })
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  removeSelectionDismiss?.()
+})
+
+function beginSelection() {
+  if (state.value !== 'CLIP_READY' || selectionMode.value) return
+  pauseForDrawing()
+  selectionSnapshot = { box: sourceBox.value ? { ...sourceBox.value } : null,
+    frame: roiFrame.value ?? frameIndex.value, duration: analysisDurationSeconds.value }
+  selectionMode.value = true
+}
+
+function cancelSelection() {
+  if (!selectionMode.value) return
+  selectionMode.value = false
+  sourceBox.value = selectionSnapshot?.box ?? null
+  if (sourceBox.value) {
+    roiFrame.value = selectionSnapshot.frame
+    seekToFrame(roiFrame.value)
+    analysisDurationSeconds.value = selectionSnapshot.duration
+  }
+  selectionSnapshot = null
+}
+
+function onBoxPicked(box) {
+  sourceBox.value = box
+  roiFrame.value = box ? frameIndex.value : null
+  selectionMode.value = false
+  selectionSnapshot = null
+}
+
+watch(state, value => { if (value !== 'CLIP_READY') cancelSelection() })
 
 function onTimeUpdate() {
   const video = videoEl.value
@@ -185,6 +239,7 @@ function onTimeUpdate() {
 }
 
 function togglePlay() {
+  if (selectionMode.value) return
   const video = videoEl.value
   if (!video) return
   if (video.paused) {
@@ -211,7 +266,7 @@ const intervalStartSeconds = computed(() => framePts.value?.[frameIndex.value]
   ?? (meta.value?.fps ? frameIndex.value / meta.value.fps : 0))
 const maxAnalysisSeconds = computed(() => Math.max(0,
   (meta.value?.durationMs || 0) / 1000 - intervalStartSeconds.value))
-const canAnalyze = computed(() => state.value === 'CLIP_READY' && !!sourceBox.value
+const canAnalyze = computed(() => state.value === 'CLIP_READY' && !!sourceBox.value && !selectionMode.value
   && analysisDurationSeconds.value > 0
   && analysisDurationSeconds.value <= maxAnalysisSeconds.value + 0.01)
 
@@ -254,6 +309,7 @@ async function requestAnalysis() {
 }
 
 function redraw() {
+  evidencePlayback.stop()
   props.session.resetAnalysis(clip.value.clipId)
   sourceBox.value = null
   showOverlay.value = false
@@ -355,6 +411,17 @@ const timeLabel = computed(() => {
       ><Icon name="close" /></button>
     </div>
 
+    <div v-if="preparation" class="clip__preparation" data-testid="clip-preparation">
+      <span class="spinner" aria-hidden="true" />
+      <div>
+        <strong>새 클립 준비 중 · {{ preparation.count }}개</strong>
+        <span class="mono">경과 {{ preparation.elapsed.toFixed(1) }}초</span>
+        <span v-if="preparation.phase === 'waiting'">예상 준비까지 약 {{ Math.ceil(preparation.remaining) }}초</span>
+        <span v-else-if="preparation.phase === 'processing'">예상 시간 경과 · 파일 준비 중</span>
+        <span v-else>영상 준비 중</span>
+      </div>
+    </div>
+
     <div class="panel__body">
       <RadarEmpty v-if="state === 'IDLE'">
         <p class="radar-empty__title">검출 대기</p>
@@ -363,8 +430,8 @@ const timeLabel = computed(() => {
 
       <div v-else-if="state === 'CLIP_PENDING'" class="clip__pending">
         <p class="dim">
-          구간 저장 중
-          <b v-if="remainingSeconds !== null" class="mono">{{ remainingSeconds }}s</b>
+          {{ remainingSeconds === 0 ? '예상 시간 경과 · 파일 준비 중' : '예상 준비까지' }}
+          <b v-if="remainingSeconds > 0" class="mono">{{ remainingSeconds }}s</b>
         </p>
         <div class="clip__progress">
           <div class="clip__progress-bar" :style="pendingBarStyle" />
@@ -378,7 +445,7 @@ const timeLabel = computed(() => {
       </div>
 
       <template v-else>
-        <div class="clip__stage">
+        <div ref="selectionStage" class="clip__stage">
           <video
             ref="videoEl"
             class="clip__video"
@@ -388,6 +455,8 @@ const timeLabel = computed(() => {
             preload="auto"
             @loadedmetadata="onLoadedMetadata"
             @timeupdate="onTimeUpdate"
+            @play="playing = true"
+            @pause="playing = false"
             @ended="playing = false"
           />
           <TrackOverlay
@@ -405,8 +474,8 @@ const timeLabel = computed(() => {
             v-if="!showOverlay"
             :video-el="videoEl"
             :source-box="sourceBox"
-            :active="state === 'CLIP_READY'"
-            @update:source-box="sourceBox = $event"
+            :active="state === 'CLIP_READY' && selectionMode"
+            @update:source-box="onBoxPicked"
             @draw-start="pauseForDrawing"
           />
         </div>
@@ -453,7 +522,15 @@ const timeLabel = computed(() => {
             {{ Math.round(sourceBox.x) }}, {{ Math.round(sourceBox.y) }},
             {{ Math.round(sourceBox.width) }}×{{ Math.round(sourceBox.height) }}
           </span>
-          <span v-else-if="state === 'CLIP_READY'" class="dim">멈춘 화면에서 대상을 클릭하세요 (드래그로 크기 지정)</span>
+          <span v-else-if="state === 'CLIP_READY' && !selectionMode" class="dim">객체 선택으로 ROI 를 지정하세요</span>
+        </div>
+
+        <div v-if="state === 'CLIP_READY'" class="strip clip__selection">
+          <button ref="selectionButton" class="btn-primary" :aria-pressed="selectionMode"
+            @click="selectionMode ? cancelSelection() : beginSelection()">
+            {{ selectionMode ? '선택 취소' : '객체 선택' }}
+          </button>
+          <span v-if="selectionMode" class="faint">객체 주변을 드래그하거나, 클릭하면 32px 박스를 만듭니다.</span>
         </div>
 
         <div class="strip clip__actions">
@@ -475,7 +552,7 @@ const timeLabel = computed(() => {
             <button class="btn-primary" :disabled="!canAnalyze" @click="requestAnalysis">
               분석 요청
             </button>
-            <button v-if="sourceBox" class="btn-ghost" @click="sourceBox = null">박스 지우기</button>
+            <button v-if="sourceBox" class="btn-ghost" @click="onBoxPicked(null)">박스 지우기</button>
             <p v-if="requestError" class="clip__error-text">{{ requestError.message }}</p>
           </template>
 
@@ -508,7 +585,9 @@ const timeLabel = computed(() => {
           </template>
         </div>
 
-        <AnalysisResult v-if="state === 'DONE'" :analysis="clip.analysis" @redraw="redraw" />
+        <AnalysisResult v-if="state === 'DONE'" :analysis="clip.analysis" :can-replay="!!meta?.videoUrl" :active-window="evidencePlayback.active.value" @play-window="evidencePlayback.play($event)" @redraw="redraw" />
+        <p v-if="evidencePlayback.active.value" class="dim" role="status">주요 구간 재생 중 · {{ evidencePlayback.active.value.start.toFixed(1) }}–{{ evidencePlayback.active.value.end.toFixed(1) }}초</p>
+        <p v-if="evidencePlayback.error.value" class="clip__error-text" role="alert">{{ evidencePlayback.error.value }}</p>
         <p v-if="state === 'DONE'" class="faint">사용한 추적 방식: {{ trackerLabel(clip.analysis?.request?.trackerVariant) }}</p>
       </template>
     </div>
@@ -516,6 +595,20 @@ const timeLabel = computed(() => {
 </template>
 
 <style scoped>
+.clip__selection { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.clip__selection > span { font-size: 12px; }
+.clip__preparation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-dim);
+  flex: none;
+}
+.clip__preparation > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.clip__preparation strong { font-size: 12px; }
+.clip__preparation span { font-size: 12px; }
 .clip__id { font-size: 12px; }
 .clip__timing { font-size: 11px; }
 .clip__interval { display: flex; align-items: center; gap: 8px; font-size: 12px; }

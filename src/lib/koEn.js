@@ -82,6 +82,7 @@ export const EXACT = {
   '브라우저에서 재생할 수 없는 영상입니다 (코덱).': 'This browser cannot play the video (codec).',
   'H.264 mp4 로 변환해서 다시 올려 주세요.': 'Convert it to H.264 mp4 and upload again.',
   '객체 선택': 'Select object',
+  '선택 취소': 'Cancel selection',
   '다시 선택': 'Select again',
   '완료': 'Done',
   '추적 중': 'Tracking',

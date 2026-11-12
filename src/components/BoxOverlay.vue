@@ -39,6 +39,7 @@ const canvasEl = ref(null)
 const dragStart = shallowRef(null)
 const dragCurrent = shallowRef(null)
 const hoverPoint = shallowRef(null)
+let capturedPointer = null
 /** 크기 변경/메타데이터 로드 때 변환을 다시 계산하기 위한 신호 */
 const geometryVersion = ref(0)
 
@@ -74,10 +75,11 @@ function eventToSourcePoint(event) {
 }
 
 function onPointerDown(event) {
-  if (!props.active || !transform.value) return
+  if (!props.active || !transform.value || event.button !== 0) return
   event.preventDefault()
   emit('draw-start')
   canvasEl.value.setPointerCapture(event.pointerId)
+  capturedPointer = event.pointerId
   dragStart.value = eventToSourcePoint(event)
   dragCurrent.value = dragStart.value
   hoverPoint.value = dragStart.value
@@ -94,7 +96,6 @@ function onPointerMove(event) {
 function onPointerUp(event) {
   if (!props.active || !dragStart.value) return
   event.preventDefault()
-  canvasEl.value.releasePointerCapture?.(event.pointerId)
   dragCurrent.value = eventToSourcePoint(event)
 
   const raw = boxFromPoints(dragStart.value, dragCurrent.value)
@@ -110,6 +111,7 @@ function onPointerUp(event) {
 
   dragStart.value = null
   dragCurrent.value = null
+  releasePointer()
   emit('update:sourceBox', clampBox(box))
   render()
 }
@@ -122,7 +124,15 @@ function onPointerLeave() {
 function onPointerCancel() {
   dragStart.value = null
   dragCurrent.value = null
+  hoverPoint.value = null
+  releasePointer()
   render()
+}
+
+function releasePointer() {
+  const id = capturedPointer
+  capturedPointer = null
+  if (id !== null && canvasEl.value?.hasPointerCapture?.(id)) canvasEl.value.releasePointerCapture(id)
 }
 
 function boxFromPoints(start, end) {
@@ -293,6 +303,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  releasePointer()
   resizeObserver?.disconnect()
   props.videoEl?.removeEventListener('loadedmetadata', invalidate)
   props.videoEl?.removeEventListener('seeked', render)
@@ -318,9 +329,9 @@ watch(() => props.sourceBox, (box) => {
   render()
 })
 watch(() => props.active, (value) => {
-  if (!value) hoverPoint.value = null
+  if (!value) onPointerCancel()
   render()
-})
+}, { flush: 'sync' })
 
 defineExpose({ redraw: invalidate })
 </script>
@@ -334,6 +345,7 @@ defineExpose({ redraw: invalidate })
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerCancel"
+    @lostpointercapture="onPointerCancel"
     @pointerleave="onPointerLeave"
   />
 </template>

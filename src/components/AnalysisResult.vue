@@ -16,14 +16,17 @@ import { ref, computed, watch } from 'vue'
 import Icon from './Icon.vue'
 import { modelLabel } from '../lib/aiModel.js'
 import DecisionEvidence from './DecisionEvidence.vue'
+import MiniRocketEvidence from './MiniRocketEvidence.vue'
 
 const props = defineProps({
   analysis: { type: Object, required: true },
   /** B 가 피처를 못 뽑은 사유 코드 목록 (AI 응답의 features.reasons) */
   featureReasons: { type: Array, default: null },
+  canReplay: { type: Boolean, default: false },
+  activeWindow: { type: Object, default: null },
 })
 
-defineEmits(['redraw'])
+defineEmits(['redraw', 'play-window'])
 
 const LABEL = {
   bird: { text: '새', color: 'var(--bird)' },
@@ -73,8 +76,8 @@ const isUncertain = computed(() => props.analysis.label === 'uncertain')
 const isMiniRocket = computed(() => props.analysis.model === 'minirocket')
 
 /** 판단 근거 펼침. 새 결과가 오면 접는다. */
-const showEvidence = ref(false)
-watch(() => props.analysis, () => { showEvidence.value = false })
+const showEvidence = ref(isMiniRocket.value)
+watch(() => props.analysis, () => { showEvidence.value = isMiniRocket.value })
 
 /** MiniRocket margin. 부호를 붙여 방향(드론 +, 새 -)이 보이게 한다. */
 const scoreText = computed(() => {
@@ -129,15 +132,7 @@ const processingLabel = computed(() => {
         <span class="result__label">{{ label.text }}</span>
       </div>
 
-      <div v-if="!isUncertain && isMiniRocket" class="result__conf">
-        <span class="eyebrow">판정 점수</span>
-        <b class="mono result__num">{{ scoreText }}</b>
-        <span class="faint result__score-note">
-          Ridge margin · 확률 아님<template v-if="analysis.windowsUsed"> · 2초 창 {{ analysis.windowsUsed }}개</template>
-        </span>
-      </div>
-
-      <div v-else-if="!isUncertain" class="result__conf">
+      <div v-if="!isUncertain && !isMiniRocket" class="result__conf">
         <span class="eyebrow">신뢰도</span>
         <b class="mono result__num">{{ confidencePercent }}<small>%</small></b>
         <div class="result__bar">
@@ -145,10 +140,11 @@ const processingLabel = computed(() => {
         </div>
       </div>
 
-      <div v-else class="result__conf">
+      <div v-else-if="isUncertain && !isMiniRocket" class="result__conf">
         <!-- 0.0 을 0% 막대로 그리지 않는다. 점수 자체를 매기지 않은 것이다. -->
         <span class="eyebrow">신뢰도</span>
-        <span class="dim result__none">분류 점수 없음</span>
+        <span v-if="isMiniRocket && Number.isFinite(analysis.decisionScore)" class="dim result__none">판정 보류 · 참고 점수 {{ scoreText }} (확률 아님)</span>
+        <span v-else class="dim result__none">분류 점수 없음</span>
       </div>
 
       <div style="flex: 1" />
@@ -178,11 +174,12 @@ const processingLabel = computed(() => {
       <span class="faint mono">({{ featureReasons.join(', ') }})</span>
     </p>
 
-    <DecisionEvidence v-if="showEvidence" :analysis="analysis" />
+    <MiniRocketEvidence v-if="showEvidence && isMiniRocket" :analysis="analysis" :can-replay="canReplay" :active-window="activeWindow" @play-window="$emit('play-window', $event)" />
+    <DecisionEvidence v-else-if="showEvidence" :analysis="analysis" />
 
     <dl v-if="processingLabel || quality" class="result__meta">
       <div v-if="processingLabel"><dt>처리</dt><dd class="mono">{{ processingLabel }}</dd></div>
-      <template v-if="quality">
+      <template v-if="quality && !isMiniRocket">
         <div><dt>추적</dt><dd class="mono">{{ quality.numPoints }}프레임</dd></div>
         <div><dt>평균 신뢰도</dt><dd class="mono">{{ (quality.meanConf * 100).toFixed(0) }}%</dd></div>
         <div><dt>트랙 품질</dt><dd>{{ STABILITY[quality.trackStability] || quality.trackStability }}</dd></div>

@@ -26,12 +26,15 @@ const props = defineProps({
   points: { type: Array, default: null },
   fps: { type: Number, default: 30 },
   frameCount: { type: Number, default: 0 },
+  activeWindow: { type: Object, default: null },
+  hasResult: { type: Boolean, default: false },
 })
 
 const videoEl = ref(null)
 const playing = ref(false)
 const frameIndex = ref(0)
 const showTrail = ref(true)
+const canPlay = computed(() => !!props.src && (props.hasResult || !!props.points?.length))
 
 const lastFrame = computed(() => Math.max(0, (props.frameCount || 1) - 1))
 
@@ -97,6 +100,7 @@ const timeLabel = computed(() => {
   if (!props.fps) return ''
   return (frameIndex.value / props.fps).toFixed(2) + 's'
 })
+defineExpose({ videoEl })
 </script>
 
 <template>
@@ -111,6 +115,8 @@ const timeLabel = computed(() => {
         preload="auto"
         @loadedmetadata="jumpToTrackStart"
         @timeupdate="onTimeUpdate"
+        @play="playing = true"
+        @pause="playing = false"
         @ended="playing = false"
       />
       <TrackOverlay
@@ -120,8 +126,10 @@ const timeLabel = computed(() => {
         :fps="fps"
         :show-trail="showTrail"
       />
+      <span v-if="activeWindow" class="player__window-note">선택 구간 {{ activeWindow.start.toFixed(1) }}–{{ activeWindow.end.toFixed(1) }}초</span>
 
-      <div v-if="!points" class="player__empty">
+      <span v-if="hasResult && !points?.length" class="player__window-note">원본 영상 좌표 궤적이 없어 영상만 표시합니다.</span>
+      <div v-if="!points && !hasResult" class="player__empty">
         <RadarEmpty :size="116">
           <p class="radar-empty__title">ROI 추적 전</p>
           <p class="faint">왼쪽에서 객체를 지정하고 ROI 추적을 누르세요</p>
@@ -130,18 +138,18 @@ const timeLabel = computed(() => {
     </div>
 
     <div class="strip player__controls">
-      <button class="btn-ghost btn-icon" :disabled="!points" :aria-label="playing ? '일시정지' : '재생'" @click="togglePlay">
+      <button class="btn-ghost btn-icon" :disabled="!canPlay" :aria-label="playing ? '일시정지' : '재생'" @click="togglePlay">
         <Icon :name="playing ? 'pause' : 'play'" />
       </button>
-      <button class="btn-ghost btn-icon" :disabled="!points" aria-label="이전 프레임" @click="seekToFrame(frameIndex - 1)"><Icon name="prev" /></button>
+      <button class="btn-ghost btn-icon" :disabled="!canPlay" aria-label="이전 프레임" @click="seekToFrame(frameIndex - 1)"><Icon name="prev" /></button>
       <input
         class="player__range"
         type="range"
         :min="0" :max="lastFrame" :value="frameIndex"
-        :disabled="!points"
+        :disabled="!canPlay"
         @input="seekToFrame(Number($event.target.value))"
       />
-      <button class="btn-ghost btn-icon" :disabled="!points" aria-label="다음 프레임" @click="seekToFrame(frameIndex + 1)"><Icon name="next" /></button>
+      <button class="btn-ghost btn-icon" :disabled="!canPlay" aria-label="다음 프레임" @click="seekToFrame(frameIndex + 1)"><Icon name="next" /></button>
 
       <span class="mono player__frame">
         frame <b>{{ frameIndex }}</b> / {{ lastFrame }}
@@ -183,6 +191,7 @@ const timeLabel = computed(() => {
   background: var(--bg-video);
   overflow: hidden;
 }
+.player__window-note { position: absolute; top: 10px; left: 10px; background: var(--bg-panel); border: 1px solid var(--border); padding: 5px 8px; font-size: 12px; pointer-events: none; }
 .player__video {
   width: 100%;
   height: 100%;

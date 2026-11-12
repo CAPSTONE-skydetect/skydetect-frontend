@@ -25,6 +25,8 @@ import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory, evidenceOf } from '../lib/historyStore.js'
 import { aiModel, aiBase } from '../lib/aiModel.js'
 import { trackerLabel } from '../lib/trackerProfiles.js'
+import { bindSelectionDismiss } from '../lib/selectionDismiss.js'
+import { useEvidencePlayback } from '../composables/useEvidencePlayback.js'
 import {
   uploadVideo, runManualTracking, toAnalysisDto, toProxiedUrl, trackStartSeconds,
   fetchTrajectory, pointsFromHistory, DEFAULT_TUNING,
@@ -36,6 +38,13 @@ const CLICK_BOX_SIZE = 32
 // 영상 상태
 const fileInput = ref(null)
 const videoEl = ref(null)
+const overlayPlayer = ref(null)
+const evidenceVideo = computed(() => overlayPlayer.value?.videoEl || videoEl.value)
+const evidencePlayback = useEvidencePlayback(evidenceVideo)
+function playEvidenceWindow(range) {
+  videoEl.value?.pause()
+  evidencePlayback.play(range)
+}
 const objectUrl = ref(null)
 const fileName = ref('')
 const uploaded = ref(null)      // AI 가 돌려준 { source_video_id, video_path, metadata } + 올린 서버 model
@@ -48,6 +57,10 @@ const dragOver = ref(false)     // 드롭 영역 위에 파일을 끌고 있는 
 // 선택 상태
 const sourceBox = ref(null)     // 원본 픽셀 {x, y, width, height}
 const selectionMode = ref(false)
+const selectionStage = ref(null)
+const selectionButton = ref(null)
+let selectionSnapshot = null
+let removeSelectionDismiss = null
 const selectionFrame = ref(null) // 선택을 시작한 순간 고정된 프레임
 const frameIndex = ref(0)
 const playing = ref(false)
@@ -79,7 +92,7 @@ const meta = computed(() => uploaded.value?.metadata || null)
 const fps = computed(() => meta.value?.fps || 30)
 const frameCount = computed(() => meta.value?.frame_count || 0)
 const lastFrame = computed(() => Math.max(0, frameCount.value - 1))
-const canRun = computed(() => !!uploaded.value && !!sourceBox.value && !running.value)
+const canRun = computed(() => !!uploaded.value && !!sourceBox.value && !running.value && !selectionMode.value)
 
 // 업로드 ------------------------------------------------------------------
 
@@ -138,6 +151,7 @@ function onDragLeave(event) {
 }
 
 function reset() {
+  evidencePlayback.stop()
   if (objectUrl.value) URL.revokeObjectURL(objectUrl.value)
   objectUrl.value = null
   uploaded.value = null
@@ -160,6 +174,7 @@ onBeforeUnmount(() => {
   if (objectUrl.value) URL.revokeObjectURL(objectUrl.value)
   clearInterval(elapsedTimer)
   window.removeEventListener('resize', onResize)
+  removeSelectionDismiss?.()
 })
 
 // 선택 --------------------------------------------------------------------
@@ -169,22 +184,32 @@ onBeforeUnmount(() => {
  * 이 시점의 프레임 번호가 그대로 init_frame_index 가 된다.
  */
 function beginSelection() {
-  if (!uploaded.value) return
+  if (!uploaded.value || running.value || selectionMode.value) return
+  selectionSnapshot = { box: sourceBox.value ? { ...sourceBox.value } : null, frame: selectionFrame.value }
   videoEl.value?.pause()
   playing.value = false
   selectionMode.value = true
   selectionFrame.value = frameIndex.value
 }
 
+function cancelSelection() {
+  if (!selectionMode.value) return
+  selectionMode.value = false
+  sourceBox.value = selectionSnapshot?.box ?? null
+  selectionFrame.value = selectionSnapshot?.frame ?? null
+  selectionSnapshot = null
+  if (sourceBox.value && selectionFrame.value !== null) seekToFrame(selectionFrame.value)
+}
+
 function clearSelection() {
   sourceBox.value = null
   selectionFrame.value = null
   selectionMode.value = false
+  selectionSnapshot = null
 }
 
-/** 다시 선택: 지우고 바로 선택 모드로 들어간다 (CODEX 와 같다). */
+/** Keep the committed ROI until a replacement is confirmed. */
 function reselect() {
-  clearSelection()
   beginSelection()
 }
 
@@ -194,14 +219,14 @@ function onBoxPicked(box) {
     selectionFrame.value = selectionFrame.value ?? frameIndex.value
     // 박스가 정해지면 선택 모드를 빠져나온다. 확대경이 계속 떠 있으면 방해된다.
     selectionMode.value = false
+    selectionSnapshot = null
   }
 }
 
 const selectionHint = computed(() => {
   if (!uploaded.value) return '영상을 먼저 올리세요.'
   if (selectionMode.value) {
-    return `프레임 ${selectionFrame.value} 고정. 객체 주변을 드래그하거나, `
-      + `짧게 클릭하면 ${CLICK_BOX_SIZE}px 박스를 만듭니다.`
+    return `객체 주변을 드래그하거나, 클릭하면 ${CLICK_BOX_SIZE}px 박스를 만듭니다.`
   }
   if (sourceBox.value) {
     return `frame ${selectionFrame.value} · ROI `
@@ -241,7 +266,14 @@ function onLoadedMetadata() {
 }
 
 function onResize() { geometryVersion.value += 1 }
-onMounted(() => window.addEventListener('resize', onResize))
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  removeSelectionDismiss = bindSelectionDismiss(window, {
+    isActive: () => selectionMode.value,
+    roots: () => [selectionStage.value, selectionButton.value],
+    cancel: cancelSelection,
+  })
+})
 
 function togglePlay() {
   const video = videoEl.value
@@ -291,6 +323,7 @@ function clamp(value, min, max) {
 
 async function run() {
   if (!canRun.value) return
+  evidencePlayback.stop()
   running.value = true
   runError.value = null
   result.value = null
@@ -529,7 +562,7 @@ watch(objectUrl, () => { result.value = null })
           </div>
 
           <template v-else>
-            <div class="upload__stage">
+            <div ref="selectionStage" class="upload__stage">
               <video
                 ref="videoEl"
                 class="upload__video"
@@ -539,6 +572,8 @@ watch(objectUrl, () => { result.value = null })
                 preload="auto"
                 @loadedmetadata="onLoadedMetadata"
                 @timeupdate="onTimeUpdate"
+                @play="playing = true"
+                @pause="playing = false"
                 @ended="playing = false"
                 @error="onVideoError"
               />
@@ -579,11 +614,13 @@ watch(objectUrl, () => { result.value = null })
 
             <div class="strip upload__select">
               <button
+                ref="selectionButton"
                 class="btn-primary"
-                :disabled="!uploaded || selectionMode || running"
-                @click="beginSelection"
-              >객체 선택</button>
-              <button :disabled="!sourceBox || running" @click="reselect">다시 선택</button>
+                :disabled="!uploaded || running"
+                :aria-pressed="selectionMode"
+                @click="selectionMode ? cancelSelection() : beginSelection()"
+              >{{ selectionMode ? '선택 취소' : '객체 선택' }}</button>
+              <button :disabled="!sourceBox || selectionMode || running" @click="reselect">다시 선택</button>
               <span class="faint upload__hint">{{ selectionHint }}</span>
             </div>
 
@@ -618,7 +655,10 @@ watch(objectUrl, () => { result.value = null })
 
           <OverlayPlayer
             v-else
+            ref="overlayPlayer"
             :src="objectUrl"
+            :active-window="evidencePlayback.active.value"
+            :has-result="!!result"
             :points="result?.points || null"
             :fps="fps"
             :frame-count="frameCount"
@@ -732,8 +772,13 @@ watch(objectUrl, () => { result.value = null })
         <AnalysisResult
           :analysis="result.analysis"
           :feature-reasons="result.features?.reasons"
-          @redraw="result = null"
+          :can-replay="!!objectUrl && !previewError"
+          :active-window="evidencePlayback.active.value"
+          @play-window="playEvidenceWindow"
+          @redraw="evidencePlayback.stop(); result = null"
         />
+        <p v-if="evidencePlayback.active.value" class="dim" role="status">주요 구간 재생 중 · {{ evidencePlayback.active.value.start.toFixed(1) }}–{{ evidencePlayback.active.value.end.toFixed(1) }}초</p>
+        <p v-if="evidencePlayback.error.value" class="upload__error" role="alert">{{ evidencePlayback.error.value }}</p>
 
         <dl class="upload__metrics">
           <template v-for="[name, value] in metricRows" :key="name">
@@ -771,12 +816,11 @@ watch(objectUrl, () => { result.value = null })
   overflow-y: auto;
 }
 .upload__top {
+  flex: none;
   display: grid;
-  /* 왼쪽(ROI 지정)이 정밀 작업이라 조금 더 넓게 준다. */
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--gap);
-  /* 영상이 클수록 클릭 한 픽셀이 가리키는 원본 픽셀이 줄어 ROI 가 정확해진다. */
-  min-height: 700px;
+  min-height: 0;
 }
 .upload__bottom { flex: none; }
 .upload__file { display: none; }
@@ -814,12 +858,15 @@ watch(objectUrl, () => { result.value = null })
 
 .upload__stage {
   position: relative;
-  flex: 1;
-  min-height: 180px;
+  flex: none;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
   background: var(--bg-video);
   overflow: hidden;
 }
 .upload__video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   /* BoxOverlay 의 fit:'contain' 과 반드시 같아야 한다. */
@@ -829,7 +876,11 @@ watch(objectUrl, () => { result.value = null })
 
 .upload__scrub {
   gap: 4px;
+  height: 40px;
 }
+.upload__top :deep(.player__stage) { flex: none; min-height: 0; aspect-ratio: 16 / 9; }
+.upload__top :deep(.player__video) { position: absolute; inset: 0; }
+.upload__top :deep(.player__controls) { height: 40px; }
 .upload__range { flex: 1; accent-color: var(--accent); width: auto; }
 .upload__frame { font-size: 12px; white-space: nowrap; }
 

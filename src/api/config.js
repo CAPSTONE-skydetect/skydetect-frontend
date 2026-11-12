@@ -30,6 +30,7 @@ export const ANALYSIS_SOURCE = pick(
 /** 라이브 HLS 플레이리스트. 기본값은 네트워크 없이도 도는 로컬 파일. */
 export const HLS_URL = import.meta.env.VITE_HLS_URL || '/mock/hls/live.m3u8'
 export const WHEP_URL = import.meta.env.VITE_WHEP_URL || ''
+export const DEVICE_RECONNECT_URL = import.meta.env.VITE_DEVICE_RECONNECT_URL || ''
 
 /* AI 서버 프록시 접두어는 판정 모델마다 다르다. lib/aiModel.js 의 aiBase() 를 쓴다. */
 

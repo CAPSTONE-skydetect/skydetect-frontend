@@ -14,6 +14,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { createFitTransform, rectToDisplay } from '../lib/videoGeometry.js'
 import { drawLock, drawTrail as drawStyledTrail } from '../lib/overlayStyle.js'
+import { observedTrailSegments } from '../lib/observedTrail.js'
 
 const props = defineProps({
   videoEl: { type: Object, default: null },
@@ -102,17 +103,13 @@ function render() {
  * 궤적을 그리게 된다.
  */
 function drawTrail(ctx, tf, frame) {
-  const path = []
-  for (const point of props.points) {
-    if (point.frameIndex > frame) break
-    if (!point.visible) continue
-    path.push({
+  for (const segment of observedTrailSegments(props.points, frame)) {
+    const path = segment.map(point => ({
       x: point.cx * tf.intrinsicWidth * tf.scale + tf.offsetX,
       y: point.cy * tf.intrinsicHeight * tf.scale + tf.offsetY,
-    })
+    }))
+    drawStyledTrail(ctx, path)
   }
-  // 굵고 빛나는 궤적. 오래된 쪽은 얇고 옅어서 최근 움직임이 도드라진다.
-  drawStyledTrail(ctx, path)
 }
 
 function drawBox(ctx, tf, point, color, predicted) {

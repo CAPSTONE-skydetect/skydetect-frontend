@@ -132,8 +132,9 @@ export async function fetchTrajectory(url, { processedWidth, processedHeight }) 
   }).filter((point) => Number.isFinite(point.frameIndex) && Number.isFinite(point.cx))
 }
 
-/** CSV 를 못 받았을 때의 대비책. 보정 좌표라 카메라가 움직이면 어긋난다. */
+/** Only uncorrected history can safely be placed on the original video. */
 export function pointsFromHistory(track) {
+  if (track?.stabilization?.applied) return null
   return (track?.history || []).map((point) => ({
     frameIndex: point.frame_index,
     cx: point.cx,
@@ -142,7 +143,7 @@ export function pointsFromHistory(track) {
     h: point.h,
     conf: point.conf,
     visible: true,
-    source: 'compensated',
+    source: 'history',
   }))
 }
 
@@ -201,6 +202,7 @@ export function toAnalysisDto(prediction, {
     quality: quality ? {
       numPoints: quality.num_points,
       meanConf: quality.mean_conf,
+      missingRatio: quality.missing_ratio ?? null,
       trackStability: quality.track_stability,
       featureStatus: quality.feature_status,
     } : null,
