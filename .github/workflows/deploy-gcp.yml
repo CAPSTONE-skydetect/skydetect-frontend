@@ -23,11 +23,12 @@ env:
   URL_MAP: skydetect-lb
   WIF_PROVIDER: projects/375497460357/locations/global/workloadIdentityPools/github/providers/github
   DEPLOY_SA: github-deployer@skydetect-514809.iam.gserviceaccount.com
-  # 빌드 시점에 번들에 박히는 값. 실시간 영상은 앱 VM 게이트웨이의 /live 를 쓴다.
+  # 빌드 시점에 번들에 박히는 값. 실시간 미리보기는 WebRTC(WHEP 협상: 게이트웨이 /whep, 영상: 앱 VM 8189)이고
+  # HLS(/live)는 WebRTC 를 쓰지 않게 빌드할 때의 예비 경로다.
   VITE_CLIP_SOURCE: spring-pi
   VITE_ANALYSIS_SOURCE: ai
   VITE_HLS_URL: /live/pi/index.m3u8
-  VITE_WHEP_URL: ""
+  VITE_WHEP_URL: /whep/pi/whep
 
 jobs:
   build:
@@ -42,7 +43,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Check build settings were baked in
-        run: grep -q '"/live/pi/index.m3u8"' dist/assets/*.js
+        run: |
+          grep -q '"/live/pi/index.m3u8"' dist/assets/*.js
+          grep -q '"/whep/pi/whep"' dist/assets/*.js
       - uses: actions/upload-artifact@v4
         with:
           name: dist
