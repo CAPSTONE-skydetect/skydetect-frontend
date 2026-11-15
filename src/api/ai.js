@@ -158,17 +158,13 @@ export function trackStartSeconds(track) {
 /**
  * AI 의 PredictionResult 를 화면이 쓰는 모양으로 맞춘다.
  *
- * 모델마다 응답 모양이 다르다.
- *   RF         confidence(확률) + rule_filter.reject_reason + top_features
- *   MiniRocket decision_score(Ridge margin, 확률 아님) + abstain_reason + 창별 점수
- * 화면은 model 을 보고 표시 방식을 고른다.
+ * 시계열 모델은 decision_score(판정 점수, 확률 아님) + abstain_reason + 창별 점수를 준다.
  *
- * @param {string} [model]  응답의 model 필드. 없으면 RF 로 본다 (이전 서버 호환)
- * @param {object} [featureValues]  응답의 features.values (RF 판단 근거에 값으로 표시)
- * @param {number} [trackStartS]  궤적 첫 관측의 영상 시각(초). MiniRocket 창 시각을 영상 기준으로 바꾼다
+ * @param {string} [model]  응답의 model 필드 (multirocket / minirocket)
+ * @param {number} [trackStartS]  궤적 첫 관측의 영상 시각(초). 창 시각을 영상 기준으로 바꾼다
  */
 export function toAnalysisDto(prediction, {
-  analysisId, clipId, elapsedMs, model = 'rf', featureValues = null, trackStartS = null,
+  analysisId, clipId, elapsedMs, model = 'multirocket', trackStartS = null,
 } = {}) {
   if (!prediction) return null
 
@@ -180,16 +176,13 @@ export function toAnalysisDto(prediction, {
     model,
     label: prediction.label,
     confidence: prediction.confidence ?? null,
-    // MiniRocket: 양수면 drone, 음수면 bird 쪽. 크기가 클수록 분리가 뚜렷하다.
+    // 양수면 drone, 음수면 bird 쪽. 크기가 클수록 분리가 뚜렷하다.
     decisionScore: prediction.decision_score ?? null,
     windowsUsed: prediction.windows_used ?? null,
     modelVersion: prediction.model_version ?? null,
-    rejectReason: prediction.rule_filter?.reject_reason ?? prediction.abstain_reason ?? null,
+    rejectReason: prediction.abstain_reason ?? null,
     rejectDetail: prediction.abstain_detail ?? null,
     // 판단 근거 (DecisionEvidence.vue)
-    baseDroneProba: prediction.base_drone_proba ?? null,
-    featureContributions: prediction.feature_contributions || null,
-    featureValues,
     windowScores: prediction.window_scores || null,
     windowStartsS: prediction.window_starts_s || null,
     windowRejections: prediction.window_rejections || null,
@@ -206,7 +199,6 @@ export function toAnalysisDto(prediction, {
       trackStability: quality.track_stability,
       featureStatus: quality.feature_status,
     } : null,
-    topFeatures: prediction.top_features || null,
   }
 }
 
@@ -273,7 +265,6 @@ async function run(analysisId, clipId, payload, videoUrl) {
     const dto = toAnalysisDto(tracked.prediction, {
       analysisId, clipId, elapsedMs: Date.now() - startedAt,
       model: tracked.model || requestedModel,
-      featureValues: tracked.features?.values || null,
       trackStartS: trackStartSeconds(track),
     })
     // overlay.mp4 는 OpenCV 'mp4v' 라 브라우저가 못 읽는다. 화면은 궤적을 받아

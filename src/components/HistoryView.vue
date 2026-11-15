@@ -27,26 +27,11 @@ const LABEL = {
   uncertain: { text: '판단불가', tone: 'warn' },
 }
 
-// 문구는 CODEX 브랜치 UI 의 REJECT_TEXT / REASON_TEXT 와 같다.
+/** uncertain 사유 (모델의 abstain_reason) */
 const REJECT_REASON = {
-  short_track: '추적된 프레임이 너무 적습니다. 더 긴 구간을 지정해 주세요.',
-  feature_error: '피처 계산에 실패했습니다.',
-  high_noise: '추적이 불안정합니다 (결측·지터 과다). 대비가 뚜렷한 구간을 다시 지정해 주세요.',
-  low_confidence: '관측 신뢰도가 낮습니다. ROI를 대상에 더 정확히 맞춰 주세요.',
-  // MiniRocket 보류 사유 (abstain_reason)
   invalid_input: '입력 궤적이 모델 계약에 맞지 않습니다 (보정 좌표·FPS 등).',
   insufficient_observation: '2초 분석 창을 만들 만큼 관측이 없습니다. 더 긴 구간을 지정해 주세요.',
   low_separation: '새와 드론 점수 차이가 작아 판정을 보류했습니다.',
-}
-
-const FEATURE_REASON = {
-  insufficient_points: '관측된 점이 너무 적습니다.',
-  insufficient_duration: '추적 구간이 너무 짧습니다.',
-  excessive_missing_fraction: '추적이 끊긴 구간이 너무 많습니다.',
-  no_usable_contiguous_segment: '연속으로 이어진 구간이 없습니다.',
-  partial_timestamps: '일부 프레임에 타임스탬프가 없습니다.',
-  nonfinite_features: '피처 계산 결과가 유효하지 않습니다.',
-  nonfinite_input: '추적 좌표에 유효하지 않은 값이 있습니다.',
 }
 
 const STABILITY = { good: '양호', fair: '보통', poor: '불량' }
@@ -102,13 +87,10 @@ function timeOf(value) {
 
 function confidenceOf(entry) {
   if (entry.label === 'uncertain') return '점수 없음'
-  // MiniRocket 은 확률이 아니라 margin 이라 %로 바꾸지 않는다.
-  if (entry.model === 'minirocket') {
-    const score = entry.decisionScore
-    if (score == null) return '-'
-    return 'margin ' + (score > 0 ? '+' : '') + score.toFixed(2)
-  }
-  return Math.round((entry.confidence || 0) * 100) + '%'
+  // 판정 점수는 확률이 아니라 %로 바꾸지 않는다.
+  const score = entry.decisionScore
+  if (score == null) return '-'
+  return '점수 ' + (score > 0 ? '+' : '') + score.toFixed(2)
 }
 
 const tuningRows = computed(() => {
@@ -212,11 +194,6 @@ const tuningRows = computed(() => {
             <a :href="selected.overlayUrl" download><Icon name="download" :size="12" />오버레이 내려받기</a>
           </p>
 
-          <p v-if="(selected.featureReasons || []).length" class="note note--muted">
-            <b>피처 단계</b> ·
-            {{ selected.featureReasons.map((c) => FEATURE_REASON[c] || c).join(' / ') }}
-          </p>
-
           <p v-if="selected.rejectReason" class="note">
             <b>사유</b> · {{ REJECT_REASON[selected.rejectReason] || selected.rejectReason }}
             <span class="faint mono">({{ selected.rejectReason }})</span>
@@ -231,7 +208,7 @@ const tuningRows = computed(() => {
 
           <dl class="detail__grid">
             <dt class="faint">판정 모델</dt>
-            <dd>{{ selected.model ? modelLabel(selected.model) : 'RF' }}</dd>
+            <dd>{{ modelLabel(selected.model) }}</dd>
             <dt class="faint">일시</dt>
             <dd class="mono">{{ timeOf(selected.createdAt) }}</dd>
             <dt class="faint">출처</dt>
@@ -255,8 +232,10 @@ const tuningRows = computed(() => {
               <dd class="mono">{{ Math.round((selected.quality.meanConf || 0) * 100) }}%</dd>
               <dt class="faint">안정성</dt>
               <dd>{{ STABILITY[selected.quality.trackStability] || selected.quality.trackStability }}</dd>
-              <dt class="faint">특징 상태</dt>
-              <dd>{{ selected.quality.featureStatus }}</dd>
+              <template v-if="selected.quality.featureStatus">
+                <dt class="faint">특징 상태</dt>
+                <dd>{{ selected.quality.featureStatus }}</dd>
+              </template>
             </dl>
           </template>
 
@@ -270,16 +249,6 @@ const tuningRows = computed(() => {
             </dl>
           </template>
 
-          <template v-if="selected.topFeatures">
-            <div class="detail__section eyebrow">주요 특징</div>
-            <div class="detail__features">
-              <span
-                v-for="(weight, name) in selected.topFeatures"
-                :key="name"
-                class="mono detail__feature"
-              >{{ name }} <b>{{ Number(weight).toFixed(2) }}</b></span>
-            </div>
-          </template>
         </template>
       </div>
 
@@ -414,9 +383,6 @@ const tuningRows = computed(() => {
 .detail__grid dt { font-size: 12px; }
 .detail__grid dd { margin: 0; }
 
-.detail__features { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; }
-.detail__feature { color: var(--text-dim); }
-.detail__feature b { color: var(--text); font-weight: 500; }
 
 @media (max-width: 1100px) {
   .history { grid-template-columns: minmax(0, 1fr); grid-auto-rows: min-content; }

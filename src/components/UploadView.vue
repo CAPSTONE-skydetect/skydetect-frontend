@@ -374,7 +374,6 @@ async function run() {
     const analysis = toAnalysisDto(response.prediction, {
       elapsedMs,
       model: response.model || model,
-      featureValues: response.features?.values || null,
       trackStartS: trackStartSeconds(track),
     })
     const urls = mapUrls(response.download_urls, base)
@@ -405,11 +404,9 @@ async function run() {
         confidence: analysis.confidence,
         decisionScore: analysis.decisionScore,
         rejectReason: analysis.rejectReason,
-        featureReasons: response.features?.reasons || null,
         bbox,
         initFrameIndex: initFrame,
         quality: analysis.quality,
-        topFeatures: analysis.topFeatures,
         ...evidenceOf(analysis),
         metrics: response.metrics || null,
         tuning: { ...request.tuning, stabilize: request.stabilize, resizeWidth: request.resizeWidth, maxSeconds: request.maxSeconds },
@@ -771,7 +768,6 @@ watch(objectUrl, () => { result.value = null })
         <p v-if="result" class="faint">사용한 추적 방식: {{ trackerLabel(result.metadata?.tracker_variant) }}</p>
         <AnalysisResult
           :analysis="result.analysis"
-          :feature-reasons="result.features?.reasons"
           :can-replay="!!objectUrl && !previewError"
           :active-window="evidencePlayback.active.value"
           @play-window="playEvidenceWindow"

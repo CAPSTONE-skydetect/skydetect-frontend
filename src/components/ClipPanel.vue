@@ -102,7 +102,6 @@ watch(() => clip.value?.analysis, (analysis) => {
     bbox: lastRequestedBbox,
     initFrameIndex: analysis.request?.initFrameIndex ?? frameIndex.value,
     quality: analysis.quality || null,
-    topFeatures: analysis.topFeatures || null,
     ...evidenceOf(analysis),
     metrics: null,
     tuning: { trackerVariant: analysis.request?.trackerVariant ?? 'd0' },
