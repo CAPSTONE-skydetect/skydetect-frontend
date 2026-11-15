@@ -6,7 +6,7 @@
  * 오른쪽에서 클립을 기다리든 분석이 돌든 왼쪽은 계속 흐르고 검출 버튼도 계속
  * 눌려야 한다. 그래서 버튼의 disabled 는 요청을 보내는 순간에만 걸린다.
  */
-import { ref, computed } from 'vue'
+import { ref, computed, onActivated, onDeactivated } from 'vue'
 import { useHls } from '../composables/useHls.js'
 import { useWebRtc } from '../composables/useWebRtc.js'
 import { HLS_URL, WHEP_URL, DEVICE_RECONNECT_URL } from '../api/config.js'
@@ -20,8 +20,12 @@ const videoEl = ref(null)
 const source = ref(HLS_URL)
 const transport = WHEP_URL ? 'webrtc' : 'hls'
 const isWebRtc = computed(() => transport === 'webrtc')
-const hls = useHls(videoEl, source, computed(() => !isWebRtc.value))
-const rtc = useWebRtc(videoEl, WHEP_URL, isWebRtc)
+// 실시간 화면은 다른 화면으로 가도 살려 둔다(App.vue KeepAlive). 보이지 않는 동안에는 영상 수신만 멈춘다.
+const visible = ref(true)
+onActivated(() => { visible.value = true })
+onDeactivated(() => { visible.value = false })
+const hls = useHls(videoEl, source, computed(() => visible.value && !isWebRtc.value))
+const rtc = useWebRtc(videoEl, WHEP_URL, computed(() => visible.value && isWebRtc.value))
 const status = computed(() => (isWebRtc.value ? rtc : hls).status.value)
 const error = computed(() => (isWebRtc.value ? rtc : hls).error.value)
 const engine = computed(() => isWebRtc.value ? 'WebRTC' : hls.engine.value)

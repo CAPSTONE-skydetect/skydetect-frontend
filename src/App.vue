@@ -81,7 +81,11 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
   <LoginView v-else-if="!user || !entered" @enter="enter" />
 
   <AppShell v-else :view="view" @change="changeView" @home="goHome">
-    <component :is="currentView" />
+    <!-- 실시간·업로드 화면은 다른 화면으로 가도 살려 둔다. 진행 중인 업로드·검출·클립 저장이
+         화면 이동으로 끊기거나 결과가 사라지지 않게 한다. 기록 화면은 매번 새로 읽는다. -->
+    <KeepAlive exclude="HistoryView">
+      <component :is="currentView" />
+    </KeepAlive>
   </AppShell>
 </template>
 
