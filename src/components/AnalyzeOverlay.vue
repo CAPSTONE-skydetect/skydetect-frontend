@@ -57,7 +57,9 @@ function render(now) {
   ctx.fillStyle = 'rgba(5,10,22,0.55)'
   ctx.fillRect(0, 0, width, height)
 
-  const elapsed = now - start
+  // requestAnimationFrame 의 now 는 그 프레임이 시작된 시각이라, 첫 프레임에서는 onMounted 에서 잰
+  // start 보다 앞설 수 있다. 음수가 되면 '.'.repeat(-1) 이 예외를 던지고 고리 투명도도 1을 넘는다.
+  const elapsed = Math.max(0, now - start)
 
   // 스캔 선: 영상 영역을 왼쪽에서 오른쪽으로 반복해서 훑는다.
   const area = tf
