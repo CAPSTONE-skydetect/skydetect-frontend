@@ -46,8 +46,9 @@ const label = computed(() => LABEL[props.analysis.label] || {
 const isUncertain = computed(() => props.analysis.label === 'uncertain')
 
 /** 판단 근거는 기본으로 펼친다. 새 결과가 오면 다시 펼친다. */
-const showEvidence = ref(true)
-watch(() => props.analysis, () => { showEvidence.value = true })
+// 판단 근거는 처음에 접어 둔다. 새 결과가 오면 다시 접는다.
+const showEvidence = ref(false)
+watch(() => props.analysis, () => { showEvidence.value = false })
 
 /** 판정 점수. 부호를 붙여 방향(드론 +, 새 -)이 보이게 한다. */
 const scoreText = computed(() => {

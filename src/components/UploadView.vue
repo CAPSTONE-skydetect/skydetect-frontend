@@ -67,14 +67,8 @@ const playing = ref(false)
 const geometryVersion = ref(0)
 
 // 추적 설정
-/** 초기 객체 지정 + 추적 설정 묶음을 펼쳐 둘지. 마지막 선택을 기억한다. */
-const SETUP_KEY = 'skydetect.upload.setupOpen'
-const setupOpen = ref((() => {
-  try { return localStorage.getItem(SETUP_KEY) !== '0' } catch { return true }
-})())
-watch(setupOpen, (open) => {
-  try { localStorage.setItem(SETUP_KEY, open ? '1' : '0') } catch { /* 저장 불가 */ }
-})
+/** 초기 객체 지정 + 추적 설정 묶음. 처음에는 접어 두고, 필요할 때 펼친다. */
+const setupOpen = ref(false)
 const tuning = ref({ ...DEFAULT_TUNING })
 const options = ref({ stabilize: true, resizeWidth: 1280, maxSeconds: 10 })
 
