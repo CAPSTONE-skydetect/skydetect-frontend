@@ -56,7 +56,6 @@ export async function fetchAnalysis(analysisId) {
         clipId: result.clipId,
         elapsedMs: result.elapsedMs,
         model: result.model,
-        featureValues: result.features?.values || null,
         trackStartS: ai.trackStartSeconds(track),
       }),
       track,
@@ -90,5 +89,4 @@ export function fetchAnalysisHistory() {
  * @property {string|null} [rejectReason]           uncertain 사유
  * @property {number} [processingTimeMs]
  * @property {object} [quality]      제안 명세 밖. AI 가 주는 품질 요약
- * @property {object} [topFeatures]  제안 명세 밖. 기여도 상위 특징
  */

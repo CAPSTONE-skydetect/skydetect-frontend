@@ -8,13 +8,13 @@
  * 언어 전환(EN / 한국어)도 여기서 한다. 화면 문구는 한국어로 쓰여 있고, 영어를 고르면
  * lib/domTranslate 가 화면에 그려진 한국어 문구를 영어로 바꿔 보여 준다.
  */
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
 import { useLocale } from '../composables/useLocale.js'
 import { startDomTranslate } from '../lib/domTranslate.js'
 import DroneMark from './DroneMark.vue'
 import { fetchHealth } from '../api/ai.js'
-import { AI_MODELS, aiModel } from '../lib/aiModel.js'
+import { aiBase } from '../lib/aiModel.js'
 
 defineProps({
   view: { type: String, required: true },
@@ -32,7 +32,7 @@ const VIEWS = [
 ]
 
 /**
- * 선택한 판정 모델의 AI 서버가 떠 있는지.
+ * 판정 모델 AI 서버가 떠 있는지.
  * 백엔드는 로그인되어 있다는 것 자체가 살아있다는 증거다.
  */
 const aiOnline = ref(null)
@@ -40,20 +40,13 @@ let probeTimer = null
 let stopTranslate = null
 
 async function probeAi() {
-  const model = aiModel.value
   try {
     await fetchHealth()
-    if (model === aiModel.value) aiOnline.value = true
+    aiOnline.value = true
   } catch {
-    if (model === aiModel.value) aiOnline.value = false
+    aiOnline.value = false
   }
 }
-
-// 모델을 바꾸면 그 서버 상태를 바로 다시 본다.
-watch(aiModel, () => {
-  aiOnline.value = null
-  probeAi()
-})
 
 onMounted(() => {
   probeAi()
@@ -88,24 +81,10 @@ onBeforeUnmount(() => {
 
       <div class="top__spacer" />
 
-      <!-- 판정 모델 토글. 다음 분석부터 적용된다. -->
-      <div class="top__group">
-        <span class="top__label">판정 모델</span>
-        <div class="seg" title="다음 분석부터 적용">
-          <button
-            v-for="item in AI_MODELS"
-            :key="item.key"
-            class="seg__item"
-            :class="{ 'seg__item--on': aiModel === item.key }"
-            @click="aiModel = item.key"
-          >{{ item.label }}</button>
-        </div>
-      </div>
-
       <span
         class="top__status"
         :class="{ 'top__status--ok': aiOnline === true, 'top__status--error': aiOnline === false }"
-        :title="`${AI_MODELS[aiModel].label} AI 서버 ${aiOnline ? '연결됨' : '응답 없음'} (${AI_MODELS[aiModel].base})`"
+        :title="`AI 서버 ${aiOnline ? '연결됨' : '응답 없음'} (${aiBase()})`"
       >
         <span class="dot" />
         {{ aiOnline === null ? 'AI 확인 중' : aiOnline ? 'AI' : 'AI 응답 없음' }}
@@ -193,8 +172,6 @@ onBeforeUnmount(() => {
   background: var(--accent);
 }
 
-.top__group { gap: 8px; }
-.top__label { font-size: 12px; color: var(--text-faint); }
 
 .seg {
   align-self: center;
@@ -243,6 +220,5 @@ onBeforeUnmount(() => {
 @media (max-width: 1100px) {
   .shell { height: auto; min-height: 100%; }
   .top { gap: 12px; padding: 0 12px; }
-  .top__label { display: none; }
 }
 </style>

@@ -56,7 +56,7 @@ let labelCursor = 0
  * uncertain 사유. skydetect-ai 의 RejectReason Literal 과 같은 어휘다.
  * (ai_server/schemas.py: short_track | feature_error | high_noise | low_confidence)
  */
-const REJECT_CYCLE = ['short_track', 'low_confidence', 'high_noise']
+const REJECT_CYCLE = ['insufficient_observation', 'low_separation']
 let rejectCursor = 0
 
 // 클립
@@ -197,24 +197,27 @@ function buildResult(record) {
       trackStability: label === 'uncertain' ? 'poor' : 'good',
       featureStatus: label === 'uncertain' ? 'partial' : 'ok',
     },
-    topFeatures: label === 'drone'
-      ? { tortuosity: 0.31, speed_cv: 0.24, turn_rate_p95: 0.18 }
-      : { turn_rate_median: 0.29, heading_change_ratio: 0.26, curvature_cv: 0.2 },
+    model: 'multirocket',
+    // 시계열 모델 응답 모양: 2초 창마다 점수, 평균 부호로 판정한다. 확률이 아니다.
+    windowStartsS: [0, 1, 2, 3],
   }
 
   if (label === 'uncertain') {
     return {
       ...base,
-      // AI 는 uncertain 일 때 confidence 를 0.0 으로 준다. "신뢰도 0%"가 아니라
-      // "점수를 매기지 않았다"는 뜻이므로 화면에서 다르게 표시해야 한다.
-      confidence: 0,
+      decisionScore: 0.12,
+      windowScores: [0.6, -0.4, 0.3, -0.02],
+      windowsUsed: 4,
       rejectReason: REJECT_CYCLE[rejectCursor++ % REJECT_CYCLE.length],
     }
   }
 
+  const sign = label === 'drone' ? 1 : -1
   return {
     ...base,
-    confidence: 0.72 + Math.random() * 0.25,
+    decisionScore: sign * (1.2 + Math.random()),
+    windowScores: [1.4, 0.9, 1.8, 0.6].map((v) => sign * v),
+    windowsUsed: 4,
     rejectReason: null,
   }
 }

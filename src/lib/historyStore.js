@@ -42,7 +42,6 @@ export function listHistory() {
  * @param {number[]} entry.bbox
  * @param {number} entry.initFrameIndex
  * @param {object|null} entry.quality
- * @param {object|null} entry.topFeatures
  * @param {object|null} entry.metrics
  * @param {object|null} entry.tuning
  * @param {string|null} entry.thumbnail   data URL
@@ -67,9 +66,6 @@ export function addHistory(entry) {
 export function evidenceOf(analysis) {
   return {
     decisionScore: analysis.decisionScore ?? null,
-    baseDroneProba: analysis.baseDroneProba ?? null,
-    featureContributions: analysis.featureContributions || null,
-    featureValues: analysis.featureValues || null,
     windowScores: analysis.windowScores || null,
     windowStartsS: analysis.windowStartsS || null,
     windowRejections: analysis.windowRejections || null,
