@@ -1,0 +1,77 @@
+name: Deploy to GCP
+# main 에 push 되면 파이 실시간 모드로 빌드해 Cloud Storage 버킷에 올리고 Cloud CDN 캐시를 비운다.
+# 배포 구성은 skydetect-ai 저장소 docker/gcp/README.md 참고.
+# GCP 인증은 Workload Identity Federation 이라 GitHub 에 키 파일을 두지 않는다
+# (GCP 쪽에서 CAPSTONE-skydetect 조직의 refs/heads/main 실행만 허용).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-gcp-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUCKET: gs://skydetect-514809-web
+  URL_MAP: skydetect-lb
+  WIF_PROVIDER: projects/375497460357/locations/global/workloadIdentityPools/github/providers/github
+  DEPLOY_SA: github-deployer@skydetect-514809.iam.gserviceaccount.com
+  # 빌드 시점에 번들에 박히는 값. 실시간 영상은 앱 VM 게이트웨이의 /live 를 쓴다.
+  VITE_CLIP_SOURCE: spring-pi
+  VITE_ANALYSIS_SOURCE: ai
+  VITE_HLS_URL: /live/pi/index.m3u8
+  VITE_WHEP_URL: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Check build settings were baked in
+        run: grep -q '"/live/pi/index.m3u8"' dist/assets/*.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 3
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Upload hashed assets first (long cache)
+        run: gcloud storage cp -r dist/assets "$BUCKET/" --cache-control="public, max-age=31536000, immutable"
+      - name: Upload other static files
+        run: |
+          find dist -type f ! -path 'dist/assets/*' ! -name index.html | while read -r f; do
+            gcloud storage cp "$f" "$BUCKET/${f#dist/}" --cache-control="public, max-age=3600" </dev/null
+          done
+      - name: Switch index.html last (no cache)
+        run: gcloud storage cp dist/index.html "$BUCKET/index.html" --cache-control="no-cache"
+      - name: Invalidate CDN cache
+        run: gcloud compute url-maps invalidate-cdn-cache "$URL_MAP" --path "/*" --async --project skydetect-514809
