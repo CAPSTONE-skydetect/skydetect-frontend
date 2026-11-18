@@ -1,8 +1,10 @@
 // Receive-only WHEP. No camera/microphone access and no external ICE servers.
 export function sessionUrl(location, endpoint) {
   if (!location) throw new Error('WHEP session location missing')
-  const url = new URL(location, endpoint)
-  if (url.origin !== new URL(endpoint).origin) throw new Error('Unexpected WHEP session origin')
+  // endpoint 가 '/whep/pi/whep' 같은 상대 경로여도 동작하도록 현재 페이지 기준으로 절대 주소로 만든다.
+  const base = new URL(endpoint, globalThis.location?.href)
+  const url = new URL(location, base)
+  if (url.origin !== base.origin) throw new Error('Unexpected WHEP session origin')
   return url.href
 }
 
