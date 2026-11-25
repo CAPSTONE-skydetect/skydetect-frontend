@@ -12,6 +12,27 @@
  */
 
 export const EXACT = {
+  '구간 점수 비중': 'Window score share',
+  '관측 기록': 'Observation record',
+  '관측 장소': 'Observation location',
+  '메모': 'Notes',
+  '(선택)': '(optional)',
+  '예: 본관 옥상': 'e.g. Main building rooftop',
+  '발견 방향이나 당시 상황을 남겨 주세요.': 'Add the direction or circumstances of the observation.',
+  '관측 기록 저장': 'Save observation',
+  '저장 중': 'Saving',
+  '저장 완료': 'Saved',
+  '상세 분석': 'Analysis details',
+  '분류를 보류했어요': 'Classification deferred',
+  '선택한 물체를 드론으로 분류했어요': 'The selected object was classified as a drone',
+  '선택한 물체를 새로 분류했어요': 'The selected object was classified as a bird',
+  '분석 결과와 함께 서버에 저장됩니다.': 'Saved to the server with the analysis result.',
+  '관측 기록을 저장했습니다. 검출 기록에서 확인할 수 있습니다.': 'Observation saved. View it in Detections.',
+  '구간 점수의 크기를 합산한 비중입니다. 분류 확률과는 다릅니다.': 'Share of total window score magnitude, distinct from classification probability.',
+  '구간 점수 비중을 계산할 수 없습니다. 유효한 구간 점수가 필요합니다.': 'Window score share is unavailable. Valid window scores are required.',
+  '미입력': 'Not provided',
+  '기록 불러오는 중': 'Loading records',
+
   // 헤더
   '실시간': 'Live',
   '업로드 분석': 'Upload analysis',
@@ -208,12 +229,12 @@ export const EXACT = {
   // 판단 근거(DecisionEvidence)
   '규칙 필터에서 탈락해 모델을 부르지 않았습니다. 위의 사유가 판단 근거입니다.': 'Rejected by the rule filter, so the model was not called. The reason above is the basis.',
   '이 결과에는 피처별 근거 정보가 없습니다 (이전 버전 서버 결과).': 'This result has no per-feature evidence (from an older server version).',
-  '← 새 쪽으로 민 피처': '← Features pushing toward bird',
-  '드론 쪽으로 민 피처 →': 'Features pushing toward drone →',
+  '← 새으로 민 피처': '← Features pushing toward bird',
+  '드론으로 민 피처 →': 'Features pushing toward drone →',
   '이 궤적이 100개 트리에서 지나간 분기마다 드론 확률이 얼마나 바뀌었는지를 피처별로 더한 값입니다. 기준값은 학습 데이터 전체의 평균 드론 확률입니다.': 'For each feature, the summed change in drone probability at every branch this trajectory took across the 100 trees. The baseline is the mean drone probability over the training data.',
   '판정에 쓸 2초 창이 없습니다.': 'There is no 2 s window to base a verdict on.',
-  '드론 쪽 ↑': 'Toward drone ↑',
-  '새 쪽 ↓': 'Toward bird ↓',
+  '드론 ↑': 'Toward drone ↑',
+  '새 ↓': 'Toward bird ↓',
   '2초 구간을 1초씩 밀어가며 잘라 구간마다 판정 점수를 냅니다. 확률이 아니라 방향과 세기입니다.': 'Slides a 2 s window by 1 s and scores each one. It is direction and strength, not a probability.',
   '속도 중앙값': 'Median speed',
   '속도 변동계수': 'Speed variation',
@@ -235,6 +256,10 @@ export const EXACT = {
  * 문장 안에 들어 있는 한국어 조각(드론/새/판단불가 등)은 이 뒤에 EXACT 로 한 번 더 바뀐다.
  */
 export const PATTERNS = [
+  [/^드론 (\d+)%$/, 'Drone $1%'],
+  [/^새 (\d+)%$/, 'Bird $1%'],
+  [/^드론 점수 합계 (.+) · 새 점수 합계 (.+)$/, 'Drone score total $1 · Bird score total $2'],
+
   [/^저장 중 (\d+)건$/, 'Saving $1'],
   [/^선택 중 · frame (\d+)$/, 'Selecting · frame $1'],
   [/^추적 중 (.+)$/, 'Tracking $1'],

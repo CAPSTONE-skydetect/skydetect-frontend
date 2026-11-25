@@ -1,11 +1,4 @@
 <script setup>
-/**
- * 검출 기록.
- *
- * 저장소는 브라우저다 (lib/historyStore.js). 백엔드에 이력 API 가 없어서다.
- * 한계는 historyStore 주석에 적어뒀고, 화면 아래에도 한 줄로 띄운다.
- * 없는 걸 있는 것처럼 보이면 나중에 "기록이 왜 사라졌지"가 된다.
- */
 import { ref, computed, watch, onMounted } from 'vue'
 import Icon from './Icon.vue'
 import { listHistory, removeHistory, clearHistory } from '../lib/historyStore.js'
@@ -13,8 +6,12 @@ import { modelLabel } from '../lib/aiModel.js'
 import { trackerLabel } from '../lib/trackerProfiles.js'
 import DecisionEvidence from './DecisionEvidence.vue'
 import RadarEmpty from './RadarEmpty.vue'
+import ScoreShare from './ScoreShare.vue'
+import { listObservations, deleteObservation, clearObservations } from '../api/observations.js'
 
 const entries = ref([])
+const historyError = ref('')
+const busy = ref(false)
 const selectedId = ref(null)
 /** 판단 근거 펼침. 다른 기록을 고르면 접는다. */
 const showEvidence = ref(false)
@@ -39,9 +36,21 @@ const SOURCE = { live: '실시간', upload: '업로드' }
 
 onMounted(reload)
 
-function reload() {
+async function reload() {
+  busy.value = true
+  historyError.value = ''
   entries.value = listHistory()
-  if (!entries.value.some((entry) => entry.id === selectedId.value)) {
+  try {
+    const saved = await listObservations()
+    const merged = new Map(entries.value.map(entry => [entry.id, entry]))
+    for (const entry of saved) merged.set(entry.id, entry)
+    entries.value = [...merged.values()].sort((a, b) => b.createdAt - a.createdAt)
+  } catch (error) {
+    historyError.value = '서버 관측 기록을 불러오지 못했습니다. ' + error.message
+  } finally {
+    busy.value = false
+  }
+  if (!entries.value.some(entry => entry.id === selectedId.value)) {
     selectedId.value = entries.value[0]?.id || null
   }
 }
@@ -63,15 +72,34 @@ const counts = computed(() => {
   return base
 })
 
-function onRemove(id) {
-  removeHistory(id)
-  reload()
+async function onRemove(id) {
+  if (busy.value) return
+  busy.value = true
+  historyError.value = ''
+  try {
+    await deleteObservation(id)
+    removeHistory(id)
+    await reload()
+  } catch (error) {
+    historyError.value = '기록을 삭제하지 못했습니다. ' + error.message
+  } finally {
+    busy.value = false
+  }
 }
 
-function onClearAll() {
-  if (!entries.value.length) return
-  clearHistory()
-  reload()
+async function onClearAll() {
+  if (busy.value || !entries.value.length) return
+  busy.value = true
+  historyError.value = ''
+  try {
+    await clearObservations()
+    clearHistory()
+    await reload()
+  } catch (error) {
+    historyError.value = '기록을 삭제하지 못했습니다. ' + error.message
+  } finally {
+    busy.value = false
+  }
 }
 
 function labelOf(entry) {
@@ -118,7 +146,7 @@ const tuningRows = computed(() => {
         <span class="panel__title">검출 기록</span>
         <span class="faint mono">{{ counts.all }}</span>
         <div style="flex: 1" />
-        <button class="btn-ghost btn-sm" :disabled="!entries.length" @click="onClearAll">전체 삭제</button>
+        <button class="btn-ghost btn-sm" :disabled="busy || !entries.length" @click="onClearAll">전체 삭제</button>
       </div>
 
       <div class="history__filters">
@@ -135,6 +163,8 @@ const tuningRows = computed(() => {
       </div>
 
       <div class="panel__body history__list">
+        <p v-if="historyError" class="note" role="alert">{{ historyError }}</p>
+        <p v-if="busy" class="faint" role="status">기록 불러오는 중</p>
         <RadarEmpty v-if="!visible.length" :size="112">
           <p class="radar-empty__title">{{ entries.length ? '해당 결과가 없습니다' : '아직 기록이 없습니다' }}</p>
           <p class="faint">분석을 마친 클립과 업로드 영상이 판정과 함께 여기에 쌓입니다.</p>
@@ -159,7 +189,7 @@ const tuningRows = computed(() => {
               <div style="flex: 1" />
               <span class="card__source">{{ SOURCE[entry.source] || entry.source }}</span>
             </div>
-            <div class="card__title">{{ entry.title }}</div>
+            <div class="card__title">{{ entry.observationLocation || entry.title }}</div>
             <div class="faint mono card__time">{{ timeOf(entry.createdAt) }}</div>
           </div>
 
@@ -194,6 +224,14 @@ const tuningRows = computed(() => {
             <a :href="selected.overlayUrl" download><Icon name="download" :size="12" />오버레이 내려받기</a>
           </p>
 
+          <ScoreShare :analysis="selected" />
+          <section v-if="selected.serverSaved" class="detail__section">
+            <h3 class="eyebrow">관측 기록</h3>
+            <dl class="detail__grid">
+              <dt class="faint">관측 장소</dt><dd>{{ selected.observationLocation || '미입력' }}</dd>
+              <dt class="faint">메모</dt><dd class="detail__memo">{{ selected.observationMemo || '미입력' }}</dd>
+            </dl>
+          </section>
           <p v-if="selected.rejectReason" class="note">
             <b>사유</b> · {{ REJECT_REASON[selected.rejectReason] || selected.rejectReason }}
             <span class="faint mono">({{ selected.rejectReason }})</span>
@@ -381,7 +419,8 @@ const tuningRows = computed(() => {
   font-size: 12px;
 }
 .detail__grid dt { font-size: 12px; }
-.detail__grid dd { margin: 0; }
+.detail__grid dd { margin: 0; overflow-wrap: anywhere; }
+.detail__memo { white-space: pre-wrap; }
 
 
 @media (max-width: 1100px) {
