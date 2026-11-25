@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { scoreShare } from '../lib/scoreShare.js'
 const props = defineProps({ analysis: { type: Object, required: true } })
 const share = computed(() => scoreShare(props.analysis.windowScores))
-const format = value => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '범위 초과'
+const format = value => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumSignificantDigits: 4 }) : '범위 초과'
 </script>
 
 <template>
