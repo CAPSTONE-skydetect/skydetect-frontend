@@ -86,12 +86,13 @@ watch(() => clip.value?.clipId, () => {
  * 판정 당시 화면이 사라진다.
  */
 const recorded = new Set()
+const historyEntries = ref({})
 watch(() => clip.value?.analysis, (analysis) => {
   if (!analysis || analysis.status !== 'DONE') return
   if (!analysis.analysisId || recorded.has(analysis.analysisId)) return
   recorded.add(analysis.analysisId)
 
-  addHistory({
+  historyEntries.value[analysis.analysisId] = addHistory({
     source: 'live',
     title: clip.value.clipId,
     model: analysis.model || null,
@@ -584,7 +585,7 @@ const timeLabel = computed(() => {
           </template>
         </div>
 
-        <AnalysisResult v-if="state === 'DONE'" :analysis="clip.analysis" :can-replay="!!meta?.videoUrl" :active-window="evidencePlayback.active.value" @play-window="evidencePlayback.play($event)" @redraw="redraw" />
+        <AnalysisResult v-if="state === 'DONE'" :analysis="clip.analysis" :history-entry="historyEntries[clip.analysis.analysisId]" @observation-saved="historyEntries[clip.analysis.analysisId] = $event" :can-replay="!!meta?.videoUrl" :active-window="evidencePlayback.active.value" @play-window="evidencePlayback.play($event)" @redraw="redraw" />
         <p v-if="evidencePlayback.active.value" class="dim" role="status">주요 구간 재생 중 · {{ evidencePlayback.active.value.start.toFixed(1) }}–{{ evidencePlayback.active.value.end.toFixed(1) }}초</p>
         <p v-if="evidencePlayback.error.value" class="clip__error-text" role="alert">{{ evidencePlayback.error.value }}</p>
         <p v-if="state === 'DONE'" class="faint">사용한 추적 방식: {{ trackerLabel(clip.analysis?.request?.trackerVariant) }}</p>

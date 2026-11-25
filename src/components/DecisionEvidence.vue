@@ -3,7 +3,7 @@
  * 판단 근거. 모델이 왜 새/드론(또는 판단불가)으로 판정했는지 보여준다.
  *
  * 시계열 모델은 2초 창마다 판정 점수를 내고, 창 점수의 평균 부호로 판정한다.
- * 색만으로 방향을 말하지 않도록 막대 옆에 "드론 쪽 / 새 쪽" 과 부호 있는 숫자를 함께 쓴다.
+ * 색만으로 방향을 말하지 않도록 막대 옆에 "드론 / 새" 과 부호 있는 숫자를 함께 쓴다.
  */
 import { computed } from 'vue'
 
@@ -64,14 +64,14 @@ function signed(value, digits = 2) {
         = 창 {{ windows.length }}개 점수의 평균
       </p>
       <p class="evidence__verdict">
-        드론 쪽 창 {{ droneWindows }}개, 새 쪽 창 {{ birdWindows }}개.
+        드론 창 {{ droneWindows }}개, 새 창 {{ birdWindows }}개.
         <template v-if="neutralWindows">경계 창 {{ neutralWindows }}개.</template>
         <template v-if="analysis.label === 'uncertain'">서버의 보류 기준에 따라 최종 판정을 보류했습니다.</template>
         <template v-else>최종 판정은 {{ analysis.label === 'drone' ? '드론' : '새' }}입니다. 점수 평균으로 결정하며 다수결이 아닙니다.</template>
       </p>
 
       <div class="mr">
-        <div class="mr__axis faint"><span>드론 쪽 ↑</span><span>새 쪽 ↓</span></div>
+        <div class="mr__axis faint"><span>드론 ↑</span><span>새 ↓</span></div>
         <div class="mr__chart">
           <div v-for="(w, i) in windows" :key="i" class="mr__col" :title="`${w.label} · 점수 ${signed(w.score)}`">
             <span class="mr__num mono">{{ signed(w.score, 1) }}</span>

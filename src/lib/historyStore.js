@@ -1,27 +1,18 @@
-/**
- * 검출 기록 저장소.
- *
- * 백엔드에 `GET /api/analyses` 가 아직 없어서 브라우저(localStorage)에 남긴다.
- * 그래서 한계가 분명하다. 적어두는 이유는 나중에 이걸 잊고 "기록이 왜 없지"
- * 하지 않기 위해서다.
- *
- *   - 이 브라우저에만 남는다. 다른 PC 나 다른 계정에서는 안 보인다
- *   - 방문 기록을 지우면 같이 사라진다
- *   - 오버레이 영상은 AI 서버의 임시 파일을 가리킨다. AI 를 재시작하거나
- *     artifacts 를 비우면 링크가 깨진다 (썸네일은 남는다)
- *
- * 백엔드가 이력 API 를 열면 이 파일을 그 호출로 바꾸면 된다. 화면(HistoryView)은
- * 여기서 주는 모양만 보므로 컴포넌트는 안 고쳐도 된다.
+/** 분석 직후의 브라우저 기록과 사용자가 서버에 저장한 관측 기록의 로컬 사본.
+ * 서버 관측 기록은 HistoryView에서 조회·병합하고 브라우저 기록은 사용자별로 보관한다.
+ * 기존 브라우저 기록도 읽을 수 있으며, 영상 산출물 링크의 수명은 AI 서버에 따른다.
  */
+import { useAuth } from '../composables/useAuth.js'
 
 const STORAGE_KEY = 'skydetect.history.v1'
 /** 썸네일이 있어서 무한정 쌓으면 localStorage 한도(보통 5MB)에 걸린다. */
 const MAX_ENTRIES = 40
+const storageKey = () => `${STORAGE_KEY}.${encodeURIComponent(useAuth().user.value?.username || 'anonymous')}`
 
 /** @returns {HistoryEntry[]} 최신이 앞 */
 export function listHistory() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey()) || localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed : []
@@ -59,6 +50,15 @@ export function addHistory(entry) {
   return record
 }
 
+/** 서버 저장 결과로 기존 브라우저 기록을 갱신한다. */
+export function updateHistory(record) {
+  const entries = listHistory()
+  const index = entries.findIndex(entry => entry.id === record.id)
+  if (index >= 0) entries[index] = record
+  else entries.unshift(record)
+  persist(entries.slice(0, MAX_ENTRIES))
+}
+
 /**
  * 기록에 남길 판단 근거 필드. 결과 화면(DecisionEvidence)이 읽는 이름 그대로 둔다.
  * 수치 몇 개라 localStorage 용량에는 거의 영향이 없다.
@@ -83,12 +83,12 @@ export function clearHistory() {
 
 function persist(entries) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
+    localStorage.setItem(storageKey(), JSON.stringify(entries))
   } catch {
     // 용량이 찼을 때. 썸네일을 버리고 다시 시도한다. 기록 자체는 살린다.
     try {
       const light = entries.map((entry) => ({ ...entry, thumbnail: null }))
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(light))
+      localStorage.setItem(storageKey(), JSON.stringify(light))
     } catch {
       // 그래도 안 되면 포기한다. 저장 실패로 화면이 죽지는 않게 둔다.
     }

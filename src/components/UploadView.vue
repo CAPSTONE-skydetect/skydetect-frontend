@@ -390,7 +390,7 @@ async function run() {
     }
 
     if (analysis) {
-      addHistory({
+      result.value.historyEntry = addHistory({
         source: 'upload',
         title: fileName.value,
         model: analysis.model,
@@ -762,6 +762,8 @@ watch(objectUrl, () => { result.value = null })
         <p v-if="result" class="faint">사용한 추적 방식: {{ trackerLabel(result.metadata?.tracker_variant) }}</p>
         <AnalysisResult
           :analysis="result.analysis"
+          :history-entry="result.historyEntry"
+          @observation-saved="result.historyEntry = $event"
           :can-replay="!!objectUrl && !previewError"
           :active-window="evidencePlayback.active.value"
           @play-window="playEvidenceWindow"
