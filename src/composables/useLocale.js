@@ -45,6 +45,11 @@ const MESSAGES = {
     'login.enter.history.text': 'Review past results.',
     'login.signout': 'Sign out',
     'lang.switch': 'Switch language',
+    'install.title': 'Add SkyDetect to your home screen',
+    'install.android': 'Open it like an app, full screen.',
+    'install.ios': 'Tap Share, then Add to Home Screen.',
+    'install.add': 'Add',
+    'install.close': 'Close',
 
     'demo.aria': 'Demo on real footage: pick an object, track it, analyze its trajectory and identify it as a drone',
     'demo.tag': 'REC · SAMPLE FOOTAGE',
@@ -86,6 +91,11 @@ const MESSAGES = {
     'login.enter.history.text': '지난 결과를 다시 봅니다.',
     'login.signout': '로그아웃',
     'lang.switch': '언어 전환',
+    'install.title': 'SkyDetect 를 홈 화면에 추가하세요',
+    'install.android': '앱처럼 전체 화면으로 바로 열 수 있습니다.',
+    'install.ios': '공유 버튼을 누른 뒤 "홈 화면에 추가"를 선택하세요.',
+    'install.add': '추가',
+    'install.close': '닫기',
 
     'demo.aria': '실제 영상 데모: 대상을 선택하고, 추적하고, 궤적을 분석해 드론으로 판별합니다',
     'demo.tag': 'REC · 샘플 영상',
