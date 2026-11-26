@@ -15,6 +15,7 @@ import { useAuth } from '../composables/useAuth.js'
 import { useLocale } from '../composables/useLocale.js'
 import LoginDemo from './LoginDemo.vue'
 import LoginGuide from './LoginGuide.vue'
+import AccountForms from './AccountForms.vue'
 import DroneMark from './DroneMark.vue'
 import PartIcon from './PartIcon.vue'
 
@@ -65,6 +66,40 @@ function messageFor(err) {
 }
 // 오류 객체를 들고 있다가 그릴 때 번역해야 언어를 바꿨을 때 문구도 따라 바뀐다.
 const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
+
+// 계정 화면 -------------------------------------------------------------------
+// 메일의 재설정 링크는 #/reset?token=... 으로 들어온다. 그 주소로 열렸으면 바로 새 비밀번호 화면을 연다.
+function readResetToken() {
+  const match = location.hash.match(/^#\/?reset\?(.*)$/)
+  return match ? new URLSearchParams(match[1]).get('token') || '' : null
+}
+const initialToken = readResetToken()
+const accountMode = ref(initialToken !== null ? 'reset' : null)
+const resetToken = ref(initialToken || '')
+const resetDone = ref(false)
+
+function leaveAccount() {
+  accountMode.value = null
+  resetToken.value = ''
+  // 주소에 남은 토큰을 지운다. 뒤로 가기나 새로고침으로 다시 쓰이지 않게.
+  if (readResetToken() !== null) history.replaceState(null, '', location.pathname + location.search)
+}
+
+/** 가입이 끝나면 같은 아이디와 비밀번호로 바로 로그인한다. 실패하면 로그인 화면으로 돌려보낸다. */
+async function onSignedUp({ username: name, password: pass }) {
+  try {
+    await login(name, pass)
+    leaveAccount()
+  } catch {
+    username.value = name
+    leaveAccount()
+  }
+}
+
+function onResetDone() {
+  resetDone.value = true
+  leaveAccount()
+}
 </script>
 
 <template>
@@ -97,8 +132,19 @@ const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
     </aside>
 
     <main class="login__main">
+      <!-- 로그인 전: 가입 / 아이디 찾기 / 비밀번호 찾기 / 새 비밀번호 -->
+      <AccountForms
+        v-if="!user && accountMode"
+        :key="accountMode"
+        :mode="accountMode"
+        :token="resetToken"
+        @back="leaveAccount()"
+        @signed-up="onSignedUp"
+        @reset-done="onResetDone"
+      />
+
       <!-- 로그인 전: 아이디/비밀번호 -->
-      <form v-if="!user" class="login__form" @submit.prevent="onSubmit">
+      <form v-else-if="!user" class="login__form" @submit.prevent="onSubmit">
         <h2>{{ t('login.heading') }}</h2>
 
         <p v-if="sessionExpired" class="note">{{ t('login.expired') }}</p>
@@ -119,6 +165,14 @@ const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
           <span v-if="submitting" class="spinner login__spinner" />
           {{ submitting ? t('login.submitting') : t('login.submit') }}
         </button>
+
+        <p v-if="resetDone" class="login__ok" role="status">{{ t('acct.reset.done') }}</p>
+
+        <nav class="login__links" :aria-label="t('acct.links')">
+          <button type="button" @click="accountMode = 'signup'">{{ t('acct.link.signup') }}</button>
+          <button type="button" @click="accountMode = 'find-id'">{{ t('acct.link.findid') }}</button>
+          <button type="button" @click="accountMode = 'find-pw'">{{ t('acct.link.findpw') }}</button>
+        </nav>
       </form>
 
       <!-- 로그인 후: 들어갈 파트 고르기 -->
@@ -224,6 +278,13 @@ const errorText = computed(() => (error.value ? messageFor(error.value) : ''))
 .login__field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .login__field input { height: 38px; font-size: 14px; color: var(--text); }
 .login__error { margin: 0; color: var(--danger); font-size: 12px; }
+.login__ok { margin: 0; font-size: 12px; line-height: 1.6; color: var(--accent-text); }
+.login__links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
+.login__links button {
+  height: auto; padding: 4px 0; border: 0; background: transparent;
+  font-size: 12px; color: var(--text-dim); cursor: pointer;
+}
+.login__links button:hover { color: var(--text); background: transparent; text-decoration: underline; }
 .login__submit { height: 40px; margin-top: 4px; font-size: 13px; }
 .login__spinner { border-color: rgba(8, 20, 42, 0.3); border-top-color: var(--on-accent); }
 
