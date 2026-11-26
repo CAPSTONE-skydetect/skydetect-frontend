@@ -16,12 +16,23 @@ import { useClipSession } from '../composables/useClipSession.js'
 import LivePanel from './LivePanel.vue'
 import ClipPanel from './ClipPanel.vue'
 import ClipQueue from './ClipQueue.vue'
+import PhoneLivePanel from './PhoneLivePanel.vue'
+import { isPhoneDevice } from '../lib/phoneCapture.js'
 
 const session = useClipSession()
+// 폰은 폰 카메라, 노트북은 파이 영상. 접속한 기기로 정한다.
+const phone = isPhoneDevice()
+
+// 폰에서 찍은 영상은 업로드 분석 화면이 이어받는다.
+function onRecorded() { location.hash = '#/upload' }
 </script>
 
 <template>
-  <main class="console">
+  <main v-if="phone" class="console console--phone">
+    <PhoneLivePanel @recorded="onRecorded" />
+  </main>
+
+  <main v-else class="console">
     <LivePanel :session="session" />
 
     <div class="console__right">
@@ -60,5 +71,8 @@ const session = useClipSession()
   }
   .console > *, .console__right > * { min-height: 360px; }
   .console__right > :last-child { min-height: 0; }
+  /* 폰 카메라 화면은 한 패널이 화면 높이를 채운다. */
+  .console--phone { grid-auto-rows: auto; }
+  .console--phone > * { min-height: calc(100svh - 140px); }
 }
 </style>

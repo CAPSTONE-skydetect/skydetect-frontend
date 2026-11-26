@@ -23,6 +23,7 @@ import TrackingTuning from './TrackingTuning.vue'
 import { toFrameIndex, createFitTransform } from '../lib/videoGeometry.js'
 import { captureThumbnail } from '../lib/videoThumbnail.js'
 import { addHistory, evidenceOf } from '../lib/historyStore.js'
+import { pendingUpload } from '../lib/pendingUpload.js'
 import { aiModel, aiBase } from '../lib/aiModel.js'
 import { trackerLabel } from '../lib/trackerProfiles.js'
 import { bindSelectionDismiss } from '../lib/selectionDismiss.js'
@@ -122,6 +123,13 @@ async function onFilePicked(event) {
     uploading.value = false
   }
 }
+
+// 실시간 화면에서 폰으로 찍은 영상이 오면 파일을 고른 것과 같은 경로로 처리한다.
+watch(pendingUpload, (file) => {
+  if (!file) return
+  pendingUpload.value = null
+  onFilePicked({ target: { files: [file] } })
+}, { immediate: true })
 
 /**
  * 끌어다 놓은 파일도 선택창으로 고른 것과 같은 경로로 처리한다.
