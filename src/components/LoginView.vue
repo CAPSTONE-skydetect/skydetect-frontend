@@ -16,6 +16,7 @@ import { useLocale } from '../composables/useLocale.js'
 import LoginDemo from './LoginDemo.vue'
 import LoginGuide from './LoginGuide.vue'
 import AccountForms from './AccountForms.vue'
+import InstallBanner from './InstallBanner.vue'
 import DroneMark from './DroneMark.vue'
 import PartIcon from './PartIcon.vue'
 
@@ -132,6 +133,9 @@ function onResetDone() {
     </aside>
 
     <main class="login__main">
+      <!-- 모바일에서 홈 화면 추가 안내. 로그인 폼 바로 위에 둔다(맨 아래에 뜨면 손이 잘 안 닿는다). -->
+      <InstallBanner />
+
       <!-- 로그인 전: 가입 / 아이디 찾기 / 비밀번호 찾기 / 새 비밀번호 -->
       <AccountForms
         v-if="!user && accountMode"

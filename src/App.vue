@@ -12,7 +12,6 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useAuth } from './composables/useAuth.js'
 import LoginView from './components/LoginView.vue'
-import InstallBanner from './components/InstallBanner.vue'
 import AppShell from './components/AppShell.vue'
 import ConsoleView from './components/ConsoleView.vue'
 import UploadView from './components/UploadView.vue'
@@ -79,11 +78,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
     <span class="dim">세션 확인 중</span>
   </div>
 
-  <template v-else-if="!user || !entered">
-    <LoginView @enter="enter" />
-    <!-- 로그인 화면에서만 안내한다. 관제 화면에서는 검출 버튼을 가리지 않게 숨긴다. -->
-    <InstallBanner />
-  </template>
+  <LoginView v-else-if="!user || !entered" @enter="enter" />
 
   <AppShell v-else :view="view" @change="changeView" @home="goHome">
     <!-- 실시간·업로드 화면은 다른 화면으로 가도 살려 둔다. 진행 중인 업로드·검출·클립 저장이
