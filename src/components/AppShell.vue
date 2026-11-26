@@ -87,7 +87,7 @@ onBeforeUnmount(() => {
         :title="`AI 서버 ${aiOnline ? '연결됨' : '응답 없음'} (${aiBase()})`"
       >
         <span class="dot" />
-        {{ aiOnline === null ? 'AI 확인 중' : aiOnline ? 'AI' : 'AI 응답 없음' }}
+        <span class="top__status-text">{{ aiOnline === null ? 'AI 확인 중' : aiOnline ? 'AI' : 'AI 응답 없음' }}</span>
       </span>
 
       <div class="seg lang" role="group" :aria-label="t('lang.switch')">
@@ -220,5 +220,34 @@ onBeforeUnmount(() => {
 @media (max-width: 1100px) {
   .shell { height: auto; min-height: 100%; }
   .top { gap: 12px; padding: 0 12px; }
+}
+
+/* 모바일: 한 줄에 다 안 들어가므로 두 줄로 나눈다. 윗줄은 로고 + 상태 + 언어 + 계정, 아랫줄은 탭. */
+@media (max-width: 800px) {
+  .top {
+    height: auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 10px;
+    padding: 0 12px;
+  }
+  .top__brand { height: 44px; }
+  .top__spacer { flex: 1; }
+  .top__user { padding-left: 10px; gap: 6px; }
+  .top__user .mono { display: none; }
+  .top__status { margin-right: 10px; }
+  .top__status-text { display: none; }
+  .tabs {
+    order: 10;
+    flex: 0 0 calc(100% + 24px);
+    margin: 0 -12px;
+    padding: 0 6px;
+    border-top: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs__item { flex: none; height: 40px; padding: 0 12px; white-space: nowrap; }
+  .tabs__item--on::after { left: 12px; right: 12px; }
 }
 </style>
